@@ -196,8 +196,28 @@
                         </div>
                         <p class="field-help" style="margin-top:-0.35rem;">
                             <% const apiKeyLimit = user.plan === 'pro' ? 25 : 3; %>
-                            API key aktif: <strong><%= user.apiKeys ? user.apiKeys.length : 0 %></strong> / <strong><%= apiKeyLimit %></strong> untuk plan <%= user.plan.toUpperCase() %>.
+                            API key aktif: <strong id="apiKeyUsedCount"><%= user.apiKeys ? user.apiKeys.length : 0 %></strong> / <strong id="apiKeyLimitCount"><%= apiKeyLimit %></strong> untuk plan <%= user.plan.toUpperCase() %>.
                         </p>
+                        <div id="generatedApiKeyCard" class="generated-api-card" hidden>
+                            <div class="generated-api-head">
+                                <div>
+                                    <strong id="generatedApiKeyLabel">New API Key</strong>
+                                    <small>Simpan sekarang. Key penuh hanya tampil sekali setelah dibuat.</small>
+                                </div>
+                                <span class="generated-api-badge"><i class="fa-solid fa-shield-keyhole"></i> Shown once</span>
+                            </div>
+                            <div class="generated-api-secret-row">
+                                <code id="generatedApiKeyValue" data-full-value="" data-masked-value=""></code>
+                                <div class="generated-api-actions">
+                                    <button id="toggleGeneratedApiKeyBtn" class="icon-btn" type="button" aria-label="Show or hide API key">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                    <button id="copyGeneratedApiKeyBtn" class="icon-btn" type="button" aria-label="Copy API key">
+                                        <i class="fa-solid fa-copy"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         
                         <div id="apiKeysList" class="items-list">
                             <% if(user.apiKeys && user.apiKeys.length > 0) { %>
@@ -599,6 +619,65 @@
     .item-title { font-weight: 600; font-size: 0.9rem; }
     .item-meta code { font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); padding: 2px 5px; border-radius: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90%; margin-top: 4px; }
     .item-actions { display: flex; gap: 0.5rem; }
+    .generated-api-card {
+        margin-top: 1rem;
+        padding: 1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(14, 165, 233, 0.25);
+        background: linear-gradient(135deg, rgba(14,165,233,0.10), rgba(249,115,22,0.08));
+        box-shadow: 0 14px 34px rgba(37, 99, 235, 0.08);
+    }
+    .generated-api-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: 0.9rem;
+    }
+    .generated-api-head strong {
+        display: block;
+        font-size: 0.98rem;
+        margin-bottom: 0.22rem;
+    }
+    .generated-api-head small {
+        color: var(--muted-text);
+        line-height: 1.55;
+    }
+    .generated-api-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.42rem 0.72rem;
+        border-radius: 999px;
+        background: rgba(37,99,235,0.12);
+        color: #1d4ed8;
+        font-size: 0.76rem;
+        font-weight: 800;
+        flex-shrink: 0;
+    }
+    .generated-api-secret-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.8rem;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: var(--input-bg);
+    }
+    .generated-api-secret-row code {
+        flex: 1;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.92rem;
+        color: var(--text);
+    }
+    .generated-api-actions {
+        display: flex;
+        gap: 0.45rem;
+        flex-shrink: 0;
+    }
     .branding-preview {
         margin-top: 0.85rem;
         border-radius: 18px;
@@ -626,6 +705,14 @@
     @media (max-width: 768px) {
         .settings-grid { grid-template-columns: 1fr; }
         .referral-actions-grid { grid-template-columns: 1fr; }
+        .generated-api-head,
+        .generated-api-secret-row {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .generated-api-actions {
+            justify-content: flex-end;
+        }
     }
 </style>
 
@@ -653,6 +740,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
         if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
         return `${numeric.toFixed(0)} B`;
+    }
+
+    function maskApiKey(value = '') {
+        if (!value) return '';
+        if (value.length <= 16) return `${value.slice(0, 6)}...`;
+        return `${value.slice(0, 10)}...${value.slice(-6)}`;
+    }
+
+    function renderGeneratedApiKey(key, label = 'New API Key') {
+        const card = document.getElementById('generatedApiKeyCard');
+        const valueNode = document.getElementById('generatedApiKeyValue');
+        const labelNode = document.getElementById('generatedApiKeyLabel');
+        const toggleBtn = document.getElementById('toggleGeneratedApiKeyBtn');
+        if (!card || !valueNode || !labelNode || !toggleBtn) return;
+
+        const masked = maskApiKey(key);
+        valueNode.dataset.fullValue = key;
+        valueNode.dataset.maskedValue = masked;
+        valueNode.dataset.revealed = 'false';
+        valueNode.textContent = masked;
+        labelNode.textContent = label;
+        toggleBtn.innerHTML = '<i class="fa-solid fa-eye"></i>';
+        card.hidden = false;
     }
 
     async function refreshProfileStorage() {
@@ -904,17 +1014,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 const data = await res.json();
                 if(res.ok) {
-                    try {
-                        await navigator.clipboard.writeText(data.key);
-                    } catch (error) {}
-                    alert(`API key baru berhasil dibuat. Simpan sekarang karena ini hanya ditampilkan sekali:\n\n${data.key}`);
-                    location.reload();
+                    renderGeneratedApiKey(data.key, data.label || label);
+                    document.getElementById('apiKeyUsedCount').textContent = Number(data.used || 0);
+                    document.getElementById('apiKeyLimitCount').textContent = Number(data.limit || 0);
+                    document.getElementById('newKeyLabel').value = '';
+                    showToast('API key berhasil dibuat. Simpan sekarang.', 'success');
                 }
                 else showToast(data.message || 'Failed to generate key', 'error');
             } catch(e) { showToast('Network error', 'error'); }
             finally {
                 generateKeyBtn.disabled = false;
                 generateKeyBtn.innerHTML = originalContent;
+            }
+        });
+    }
+
+    const toggleGeneratedApiKeyBtn = document.getElementById('toggleGeneratedApiKeyBtn');
+    if (toggleGeneratedApiKeyBtn) {
+        toggleGeneratedApiKeyBtn.addEventListener('click', () => {
+            const valueNode = document.getElementById('generatedApiKeyValue');
+            if (!valueNode) return;
+            const isRevealed = valueNode.dataset.revealed === 'true';
+            valueNode.dataset.revealed = isRevealed ? 'false' : 'true';
+            valueNode.textContent = isRevealed ? valueNode.dataset.maskedValue : valueNode.dataset.fullValue;
+            toggleGeneratedApiKeyBtn.innerHTML = isRevealed
+                ? '<i class="fa-solid fa-eye"></i>'
+                : '<i class="fa-solid fa-eye-slash"></i>';
+        });
+    }
+
+    const copyGeneratedApiKeyBtn = document.getElementById('copyGeneratedApiKeyBtn');
+    if (copyGeneratedApiKeyBtn) {
+        copyGeneratedApiKeyBtn.addEventListener('click', async () => {
+            const valueNode = document.getElementById('generatedApiKeyValue');
+            const fullValue = valueNode?.dataset?.fullValue || '';
+            if (!fullValue) {
+                showToast('Belum ada API key baru untuk disalin.', 'warning');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(fullValue);
+                showToast('API key berhasil disalin.', 'success');
+            } catch (error) {
+                showToast('Gagal menyalin API key.', 'error');
             }
         });
     }

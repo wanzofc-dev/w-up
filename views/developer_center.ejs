@@ -303,6 +303,37 @@
         .developer-shell { padding: 1rem; }
         .developer-hero-stats, .developer-stat-rail, .developer-log-row, .endpoint-row { grid-template-columns: 1fr; }
     }
+    [data-theme="dark"] .developer-mini-card,
+    [data-theme="dark"] .developer-card,
+    [data-theme="dark"] .developer-stat-box,
+    [data-theme="dark"] .endpoint-row,
+    [data-theme="dark"] .developer-log-row {
+        background: linear-gradient(180deg, rgba(9,18,31,0.96), rgba(12,24,41,0.92));
+        border-color: rgba(56, 189, 248, 0.14);
+        box-shadow: 0 18px 34px rgba(2, 8, 23, 0.28);
+    }
+    [data-theme="dark"] .developer-stat-box small,
+    [data-theme="dark"] .developer-card p,
+    [data-theme="dark"] .developer-log-row span,
+    [data-theme="dark"] .endpoint-row span {
+        color: #9db2d0;
+    }
+    [data-theme="dark"] .developer-pill {
+        color: #d9f4ff;
+        background: linear-gradient(135deg, rgba(56,189,248,0.18), rgba(251,146,60,0.16));
+    }
+    [data-theme="dark"] .developer-mini-card {
+        background: linear-gradient(180deg, rgba(16,29,48,0.72), rgba(21,38,63,0.48));
+        border-color: rgba(191,219,254,0.18);
+    }
+    [data-theme="dark"] .developer-mini-card small {
+        color: rgba(219,234,254,0.72);
+    }
+    [data-theme="dark"] .endpoint-row code,
+    [data-theme="dark"] .developer-log-row strong,
+    [data-theme="dark"] .developer-card h3 {
+        color: #f2f7ff;
+    }
 </style>
 
 <script>
