@@ -45,8 +45,14 @@
                 const used = user.storageUsed || 0;
                 const percentage = totalLimit > 0 ? Math.min(100, (used / totalLimit) * 100) : 0;
             %>
-            <div class="progress-bar"><div class="fill" style="width: <%= percentage %>%;"></div></div>
-            <small><%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB of <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB used</small>
+            <div class="storage-label-row">
+                <span>Storage</span>
+                <strong id="storagePercent"><%= percentage.toFixed(1) %>%</strong>
+            </div>
+            <div class="progress-bar"><div class="fill" id="storageFill" style="width: <%= percentage %>%;"></div></div>
+            <small id="storageMeta" data-storage-used="<%= used %>" data-storage-total="<%= totalLimit %>">
+                <%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB
+            </small>
         </div>
     </aside>
 
@@ -92,26 +98,44 @@
 
         <section class="dashboard-hero">
             <div class="dashboard-hero-copy">
-                <span class="dashboard-hero-badge">Workspace Overview</span>
-                <h2><%= currentFolder ? currentFolder.originalName : 'Semua file Anda' %> sekarang tampil dengan kontrol yang lebih cepat dan lebih rapi.</h2>
-                <p>Upload, ekstrak arsip, cari file, dan kelola ruang kerja dari satu dashboard yang lebih fokus ke aksi penting.</p>
+                <span class="dashboard-hero-badge">Server-Synced Workspace</span>
+                <h2><%= currentFolder ? currentFolder.originalName : 'Dashboard utama Anda' %> sekarang tersambung langsung ke file server, statistik storage, dan upload queue real-time.</h2>
+                <p>Owned files, folder, shared items, dan pemakaian storage di bawah ini selalu mengikuti data server aktif. Upload baru juga masuk ke queue modal tanpa me-refresh halaman.</p>
+                <div class="hero-storage-strip">
+                    <div>
+                        <small>Storage capacity</small>
+                        <strong id="heroStorageUsage"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB</strong>
+                    </div>
+                    <div class="hero-storage-rail">
+                        <div class="hero-storage-fill" id="heroStorageFill" style="width: <%= percentage %>%;"></div>
+                    </div>
+                </div>
             </div>
             <div class="dashboard-hero-stats">
                 <article class="hero-stat-card">
                     <small>Owned files</small>
-                    <strong><%= dashboardStats ? dashboardStats.ownedFiles : files.length %></strong>
+                    <strong id="statOwnedFiles" data-value="<%= dashboardStats ? dashboardStats.ownedFiles : files.length %>"><%= dashboardStats ? dashboardStats.ownedFiles : files.length %></strong>
+                    <span>File aktif milik akun ini.</span>
                 </article>
                 <article class="hero-stat-card">
                     <small>Folders</small>
-                    <strong><%= dashboardStats ? dashboardStats.ownedFolders : 0 %></strong>
+                    <strong id="statOwnedFolders" data-value="<%= dashboardStats ? dashboardStats.ownedFolders : 0 %>"><%= dashboardStats ? dashboardStats.ownedFolders : 0 %></strong>
+                    <span>Ruang kerja yang sudah disusun.</span>
                 </article>
                 <article class="hero-stat-card">
                     <small>Shared items</small>
-                    <strong><%= dashboardStats ? dashboardStats.sharedItems : 0 %></strong>
+                    <strong id="statSharedItems" data-value="<%= dashboardStats ? dashboardStats.sharedItems : 0 %>"><%= dashboardStats ? dashboardStats.sharedItems : 0 %></strong>
+                    <span>Item yang melibatkan kolaborator.</span>
                 </article>
                 <article class="hero-stat-card">
                     <small>Storage used</small>
-                    <strong><%= dashboardStats ? (dashboardStats.currentUsage / 1024 / 1024 / 1024).toFixed(2) : '0.00' %> GB</strong>
+                    <strong id="statStorageUsed" data-bytes="<%= dashboardStats ? dashboardStats.currentUsage : 0 %>"><%= dashboardStats ? (dashboardStats.currentUsage / 1024 / 1024 / 1024).toFixed(2) : '0.00' %> GB</strong>
+                    <span id="statStorageDetail"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB tersinkron.</span>
+                </article>
+                <article class="hero-stat-card">
+                    <small>Total downloads</small>
+                    <strong id="statDownloads" data-value="<%= dashboardStats ? dashboardStats.totalDownloads : 0 %>"><%= dashboardStats ? dashboardStats.totalDownloads : 0 %></strong>
+                    <span>Total download dari file pada view ini.</span>
                 </article>
             </div>
         </section>
@@ -168,6 +192,8 @@
                      data-type="<%= file.isFolder ? 'folder' : 'file' %>"
                      data-content-type="<%= file.contentType %>"
                      data-is-hidden="<%= file.isHidden ? 'true' : 'false' %>"
+                     data-size="<%= file.size || 0 %>"
+                     data-created-at="<%= file.createdAt ? file.createdAt.toISOString() : '' %>"
                      data-ext="<%= ext %>"
                      draggable="true">
                     
@@ -177,7 +203,7 @@
 
                     <div class="file-preview">
                         <% if (file.isFolder) { %><i class="fa-solid fa-folder folder-icon"></i>
-                        <% } else if (file.contentType.startsWith('image/')) { %><i class="fa-solid fa-image image-icon"></i>
+                        <% } else if (file.contentType.startsWith('image/')) { %><img src="/w-upload/raw/<%= encodeURIComponent(file.customAlias) %>" alt="<%= file.originalName %>" loading="lazy" class="file-thumb">
                         <% } else if (file.contentType.startsWith('video/')) { %><i class="fa-solid fa-video video-icon"></i>
                         <% } else if (ext === 'pdf') { %><i class="fa-solid fa-file-pdf file-icon"></i>
                         <% } else if (ext === 'zip' || ext === 'rar') { %><i class="fa-solid fa-file-zipper file-icon"></i>
@@ -248,6 +274,30 @@
 <div class="modal" id="remoteModal"><div class="modal-box"><h3>Remote Upload</h3><input type="url" id="remoteUrlInput" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="startRemoteBtn">Fetch</button></div></div></div>
 <div class="modal" id="renameModal"><div class="modal-box"><h3>Rename</h3><input type="text" id="renameInput" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmRenameBtn">Save</button></div></div></div>
 <div class="modal" id="metaModal"><div class="modal-box"><h3>Details</h3><textarea id="descInput" placeholder="Description" class="full-input"></textarea><input type="text" id="tagsInput" placeholder="Tags (comma, separated)" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="saveMetaBtn">Save</button></div></div></div>
+<div class="modal" id="uploadProgressModal">
+    <div class="modal-box upload-progress-box">
+        <div class="upload-progress-head">
+            <div>
+                <span class="upload-progress-badge">Live Upload Queue</span>
+                <h3>Upload sedang berjalan</h3>
+                <p id="uploadModalSummary">Menyiapkan file untuk dikirim ke server.</p>
+            </div>
+            <button class="icon-btn" type="button" id="closeUploadProgressBtn" aria-label="Close upload progress">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+        <div class="upload-progress-overall">
+            <div class="upload-progress-rail">
+                <div class="upload-progress-fill" id="uploadOverallFill"></div>
+            </div>
+            <div class="upload-progress-meta">
+                <strong id="uploadOverallLabel">0%</strong>
+                <span id="uploadOverallCount">0 / 0 selesai</span>
+            </div>
+        </div>
+        <div class="upload-progress-list" id="uploadProgressList"></div>
+    </div>
+</div>
 <input type="file" id="fileInput" multiple hidden>
 
 <style>
@@ -276,6 +326,38 @@
     }
     .dashboard-hero h2 { margin: 0.8rem 0 0.7rem; font-size: clamp(1.7rem, 2.8vw, 2.35rem); line-height: 1.15; }
     .dashboard-hero p { margin: 0; color: rgba(255,255,255,0.76); line-height: 1.72; max-width: 740px; }
+    .hero-storage-strip {
+        display: grid;
+        gap: 0.7rem;
+        margin-top: 1rem;
+        padding: 0.95rem 1rem;
+        border-radius: 20px;
+        background: rgba(255,255,255,0.10);
+        border: 1px solid rgba(255,255,255,0.14);
+        max-width: 560px;
+    }
+    .hero-storage-strip small {
+        display: block;
+        color: rgba(255,255,255,0.68);
+        margin-bottom: 0.2rem;
+    }
+    .hero-storage-strip strong { font-size: 1rem; }
+    .hero-storage-rail,
+    .upload-progress-rail {
+        width: 100%;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.12);
+        overflow: hidden;
+    }
+    .hero-storage-fill,
+    .upload-progress-fill {
+        height: 100%;
+        width: 0;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #38bdf8, #f97316);
+        transition: width 0.25s ease;
+    }
     .dashboard-hero-stats {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -293,6 +375,13 @@
         margin-bottom: 0.25rem;
     }
     .hero-stat-card strong { font-size: 1.25rem; }
+    .hero-stat-card span {
+        display: block;
+        margin-top: 0.3rem;
+        color: rgba(255,255,255,0.68);
+        font-size: 0.82rem;
+        line-height: 1.55;
+    }
     .dashboard-quick-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -329,6 +418,13 @@
     }
     .quick-card strong { display: block; color: var(--text); }
     .quick-card small { color: var(--muted-text); }
+    .file-thumb {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        border-radius: 14px;
+    }
     .file-visibility-badge {
         display: inline-flex;
         align-items: center;
@@ -370,6 +466,101 @@
     .main-content {
         -webkit-overflow-scrolling: touch;
     }
+    .upload-progress-box {
+        width: min(760px, calc(100vw - 2rem));
+        max-width: 760px;
+        padding: 1.25rem;
+        border-radius: 28px;
+    }
+    .upload-progress-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+    }
+    .upload-progress-head h3 {
+        margin: 0.45rem 0 0.25rem;
+        font-size: 1.45rem;
+    }
+    .upload-progress-head p {
+        margin: 0;
+        color: var(--muted-text);
+        line-height: 1.6;
+    }
+    .upload-progress-badge {
+        display: inline-flex;
+        padding: 0.35rem 0.72rem;
+        border-radius: 999px;
+        background: rgba(37,99,235,0.1);
+        color: #2563eb;
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .upload-progress-overall {
+        margin-bottom: 1rem;
+        padding: 1rem;
+        border-radius: 20px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+    }
+    .upload-progress-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-top: 0.7rem;
+        color: var(--muted-text);
+    }
+    .upload-progress-list {
+        display: grid;
+        gap: 0.85rem;
+        max-height: min(56vh, 460px);
+        overflow-y: auto;
+        padding-right: 0.15rem;
+    }
+    .upload-row {
+        padding: 1rem;
+        border-radius: 20px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+    }
+    .upload-row-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 0.7rem;
+    }
+    .upload-row-name {
+        font-weight: 700;
+        color: var(--text);
+        word-break: break-word;
+    }
+    .upload-row-size,
+    .upload-row-note {
+        color: var(--muted-text);
+        font-size: 0.84rem;
+        line-height: 1.55;
+    }
+    .upload-row-note { margin-top: 0.55rem; }
+    .upload-status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.3rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+    }
+    .upload-status.uploading { background: rgba(37,99,235,0.1); color: #2563eb; }
+    .upload-status.success { background: rgba(22,163,74,0.12); color: #15803d; }
+    .upload-status.error { background: rgba(239,68,68,0.12); color: #b91c1c; }
+    .upload-status.info { background: rgba(148,163,184,0.12); color: #475569; }
     @media (hover: none), (pointer: coarse) {
         .context-trigger {
             opacity: 1 !important;
@@ -387,6 +578,7 @@
     #analyticsList li { margin-bottom: 0.5rem; }
     @media (max-width: 980px) {
         .dashboard-hero, .dashboard-quick-grid { grid-template-columns: 1fr; }
+        .dashboard-hero-stats { grid-template-columns: 1fr; }
         .share-link-toolbar, .share-custom-row { flex-direction: column; align-items: stretch; }
     }
 </style>
@@ -395,17 +587,227 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const currentFolderId = new URLSearchParams(window.location.search).get('folderId');
+    const currentFilter = new URLSearchParams(window.location.search).get('filter');
+    const currentType = new URLSearchParams(window.location.search).get('type');
     const fileInput = document.getElementById('fileInput');
     const dropZone = document.getElementById('dropZone');
     const sidebar = document.getElementById('mainSidebar');
     const sidebarToggle = document.getElementById('sidebarToggle');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const closeSidebarBtn = document.getElementById('closeSidebarBtn');
-    
+    const fileGrid = document.getElementById('fileGrid');
+    const uploadProgressModal = document.getElementById('uploadProgressModal');
+    const uploadProgressList = document.getElementById('uploadProgressList');
+    const uploadOverallFill = document.getElementById('uploadOverallFill');
+    const uploadOverallLabel = document.getElementById('uploadOverallLabel');
+    const uploadOverallCount = document.getElementById('uploadOverallCount');
+    const uploadModalSummary = document.getElementById('uploadModalSummary');
+    const closeUploadProgressBtn = document.getElementById('closeUploadProgressBtn');
+    const dashboardState = {
+        stats: {
+            ownedFiles: <%- JSON.stringify(dashboardStats ? dashboardStats.ownedFiles : files.filter(file => !file.isFolder).length) %>,
+            ownedFolders: <%- JSON.stringify(dashboardStats ? dashboardStats.ownedFolders : files.filter(file => file.isFolder).length) %>,
+            sharedItems: <%- JSON.stringify(dashboardStats ? dashboardStats.sharedItems : 0) %>,
+            currentUsage: <%- JSON.stringify(dashboardStats ? dashboardStats.currentUsage : 0) %>,
+            totalDownloads: <%- JSON.stringify(dashboardStats ? dashboardStats.totalDownloads : 0) %>
+        },
+        storage: {
+            total: <%- JSON.stringify(totalLimit || 0) %>
+        },
+        uploading: false,
+        uploadItems: []
+    };
+
+    function escapeHtml(value = '') {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function formatBytes(bytes = 0) {
+        const value = Number(bytes || 0);
+        if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+        if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
+        return `${value} B`;
+    }
+
+    function getFileExtension(name = '') {
+        const parts = String(name).split('.');
+        return parts.length > 1 ? parts.pop().toLowerCase() : '';
+    }
+
+    function getFilePreviewMarkup(file) {
+        if (file.isFolder) return '<i class="fa-solid fa-folder folder-icon"></i>';
+        if ((file.contentType || '').startsWith('image/')) {
+            return `<img src="/w-upload/raw/${encodeURIComponent(file.customAlias)}" alt="${escapeHtml(file.originalName)}" loading="lazy" class="file-thumb">`;
+        }
+        if ((file.contentType || '').startsWith('video/')) return '<i class="fa-solid fa-video video-icon"></i>';
+        const ext = getFileExtension(file.originalName);
+        if (ext === 'pdf') return '<i class="fa-solid fa-file-pdf file-icon"></i>';
+        if (ext === 'zip' || ext === 'rar') return '<i class="fa-solid fa-file-zipper file-icon"></i>';
+        if (ext === 'md') return '<i class="fa-brands fa-markdown file-icon"></i>';
+        if (['js', 'html', 'css', 'py', 'java', 'json', 'xml', 'sql'].includes(ext)) return '<i class="fa-solid fa-file-code file-icon"></i>';
+        return '<i class="fa-solid fa-file file-icon"></i>';
+    }
+
+    function buildFileCardMarkup(file) {
+        const ext = getFileExtension(file.originalName);
+        const safeName = escapeHtml(file.originalName);
+        const href = file.isFolder
+            ? `/dashboard?folderId=${encodeURIComponent(file.id)}`
+            : `/w-upload/file/${encodeURIComponent(file.customAlias)}`;
+        const meta = file.isFolder
+            ? 'Folder'
+            : `${formatBytes(file.size)} <span class="file-visibility-badge ${file.isHidden ? 'private' : 'public'}">${file.isHidden ? 'Private' : 'Public'}</span>`;
+
+        return `
+            <div class="file-card ${file.isFolder ? 'folder' : ''}"
+                 data-id="${escapeHtml(file.id)}"
+                 data-name="${safeName}"
+                 data-alias="${escapeHtml(file.customAlias)}"
+                 data-type="${file.isFolder ? 'folder' : 'file'}"
+                 data-content-type="${escapeHtml(file.contentType || 'application/octet-stream')}"
+                 data-is-hidden="${file.isHidden ? 'true' : 'false'}"
+                 data-size="${Number(file.size || 0)}"
+                 data-created-at="${escapeHtml(file.createdAt || '')}"
+                 data-ext="${escapeHtml(ext)}"
+                 draggable="true">
+                <div class="selection-check">
+                    <input type="checkbox" class="file-check" value="${escapeHtml(file.id)}">
+                </div>
+                <div class="file-preview">
+                    ${getFilePreviewMarkup(file)}
+                </div>
+                <div class="file-details">
+                    <a href="${href}" class="filename">${safeName}</a>
+                    <div class="meta">${meta}</div>
+                </div>
+                <div class="context-trigger"><i class="fa-solid fa-ellipsis-vertical"></i></div>
+            </div>
+        `;
+    }
+
+    function matchesCurrentView(file) {
+        if (currentFilter === 'trash' || currentFilter === 'shared' || currentFilter === 'starred') return false;
+        if (currentFolderId && String(file.parentId || '') !== String(currentFolderId)) return false;
+        if (!currentFolderId && file.parentId) return false;
+        if (currentType === 'image' && !(file.contentType || '').startsWith('image/')) return false;
+        if (currentType === 'video' && !(file.contentType || '').startsWith('video/')) return false;
+        if (currentType === 'doc' && !/pdf|document|text/i.test(file.contentType || '')) return false;
+        return true;
+    }
+
+    function updateDashboardStatsUi() {
+        const used = Number(dashboardState.stats.currentUsage || 0);
+        const total = Number(dashboardState.storage.total || 0);
+        const percentage = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+        document.getElementById('statOwnedFiles').textContent = dashboardState.stats.ownedFiles;
+        document.getElementById('statOwnedFolders').textContent = dashboardState.stats.ownedFolders;
+        document.getElementById('statSharedItems').textContent = dashboardState.stats.sharedItems;
+        document.getElementById('statDownloads').textContent = dashboardState.stats.totalDownloads;
+        document.getElementById('statStorageUsed').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        document.getElementById('statStorageDetail').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB tersinkron.`;
+        document.getElementById('heroStorageUsage').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        document.getElementById('heroStorageFill').style.width = `${percentage}%`;
+
+        const storageFill = document.getElementById('storageFill');
+        const storagePercent = document.getElementById('storagePercent');
+        const storageMeta = document.getElementById('storageMeta');
+        if (storageFill && storagePercent && storageMeta) {
+            storageFill.style.width = `${percentage}%`;
+            storagePercent.textContent = `${percentage.toFixed(1)}%`;
+            storageMeta.textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB`;
+            storageMeta.dataset.storageUsed = String(used);
+            storageMeta.dataset.storageTotal = String(total);
+        }
+    }
+
+    function openUploadProgressModal(totalFiles) {
+        uploadProgressModal.classList.add('active');
+        closeUploadProgressBtn.disabled = true;
+        dashboardState.uploadItems = [];
+        uploadProgressList.innerHTML = '';
+        uploadOverallFill.style.width = '0%';
+        uploadOverallLabel.textContent = '0%';
+        uploadOverallCount.textContent = `0 / ${totalFiles} selesai`;
+        uploadModalSummary.textContent = totalFiles > 1
+            ? `${totalFiles} file sedang diproses dan dikirim ke server tanpa refresh halaman.`
+            : '1 file sedang diproses dan dikirim ke server tanpa refresh halaman.';
+    }
+
+    function closeUploadProgressModal(force = false) {
+        if (dashboardState.uploading && !force) return;
+        uploadProgressModal.classList.remove('active');
+    }
+
+    function createUploadRow(file, index) {
+        const row = document.createElement('div');
+        row.className = 'upload-row';
+        row.dataset.uploadId = String(index);
+        row.innerHTML = `
+            <div class="upload-row-top">
+                <div>
+                    <div class="upload-row-name">${escapeHtml(file.name)}</div>
+                    <div class="upload-row-size">${formatBytes(file.size)}</div>
+                </div>
+                <span class="upload-status info">queued</span>
+            </div>
+            <div class="upload-progress-rail">
+                <div class="upload-progress-fill" style="width: 0%;"></div>
+            </div>
+            <div class="upload-row-note">Menunggu giliran upload.</div>
+        `;
+        uploadProgressList.appendChild(row);
+        return row;
+    }
+
+    function updateUploadRow(row, { percent, status, note }) {
+        const clampedPercent = Math.max(0, Math.min(100, Number(percent || 0)));
+        row.querySelector('.upload-progress-fill').style.width = `${clampedPercent}%`;
+        row.querySelector('.upload-status').className = `upload-status ${status}`;
+        row.querySelector('.upload-status').textContent = status;
+        row.querySelector('.upload-row-note').textContent = note;
+    }
+
+    function updateUploadOverall(totalFiles) {
+        const completed = dashboardState.uploadItems.filter(item => item.done).length;
+        const aggregate = dashboardState.uploadItems.reduce((sum, item) => sum + Number(item.progress || 0), 0);
+        const percent = totalFiles > 0 ? aggregate / totalFiles : 0;
+        uploadOverallFill.style.width = `${percent}%`;
+        uploadOverallLabel.textContent = `${Math.round(percent)}%`;
+        uploadOverallCount.textContent = `${completed} / ${totalFiles} selesai`;
+    }
+
+    function appendUploadedFile(file) {
+        if (!matchesCurrentView(file)) return;
+        const emptyState = fileGrid.querySelector('.empty-state');
+        if (emptyState) emptyState.remove();
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = buildFileCardMarkup(file).trim();
+        const card = wrapper.firstElementChild;
+        const existingFolders = Array.from(fileGrid.querySelectorAll('.file-card.folder'));
+        const insertAfter = existingFolders[existingFolders.length - 1] || null;
+        if (insertAfter && insertAfter.nextSibling) {
+            fileGrid.insertBefore(card, insertAfter.nextSibling);
+        } else if (insertAfter) {
+            fileGrid.appendChild(card);
+        } else {
+            fileGrid.prepend(card);
+        }
+        attachFileCardEvents(card);
+        attachSelectionHandler(card.querySelector('.file-check'));
+    }
+
     function toggleSidebar() { sidebar.classList.toggle('active'); sidebarOverlay.classList.toggle('active'); }
     if(sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
     if(closeSidebarBtn) closeSidebarBtn.addEventListener('click', toggleSidebar);
     if(sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
+    closeUploadProgressBtn?.addEventListener('click', () => closeUploadProgressModal());
+    updateDashboardStatsUi();
 
     document.getElementById('quickUploadBtn')?.addEventListener('click', () => document.getElementById('uploadBtn').click());
     document.getElementById('quickFolderBtn')?.addEventListener('click', () => document.getElementById('newFolderBtn').click());
@@ -422,23 +824,128 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function handleUpload(files) {
-        showToast(`Uploading ${files.length} files...`, 'info');
-        for (const file of files) { await uploadStandard(file); }
-        setTimeout(() => location.reload(), 1500);
+        const queue = Array.from(files || []).filter(Boolean);
+        if (!queue.length) return;
+        dashboardState.uploading = true;
+        openUploadProgressModal(queue.length);
+        dashboardState.uploadItems = queue.map((file, index) => ({
+            id: index,
+            file,
+            row: createUploadRow(file, index),
+            progress: 0,
+            done: false
+        }));
+
+        let successCount = 0;
+        for (const item of dashboardState.uploadItems) {
+            const result = await uploadStandard(item);
+            if (result?.success) successCount += 1;
+            updateUploadOverall(queue.length);
+        }
+
+        dashboardState.uploading = false;
+        closeUploadProgressBtn.disabled = false;
+        uploadModalSummary.textContent = successCount === queue.length
+            ? `Semua ${queue.length} file selesai diupload tanpa refresh halaman.`
+            : `${successCount} dari ${queue.length} file berhasil diupload. Sisanya perlu dicek ulang.`;
+        fileInput.value = '';
+        window.dispatchEvent(new Event('storage:refresh'));
     }
     
-    function uploadStandard(file) {
+    function uploadStandard(item) {
         return new Promise((resolve) => {
+            const { file, row } = item;
             const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = async () => {
-                const res = await fetch('/api/upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename: file.name, contentType: file.type, base64: reader.result, parentId: currentFolderId })
+            reader.onprogress = (event) => {
+                if (!event.lengthComputable) return;
+                item.progress = Math.max(item.progress, (event.loaded / event.total) * 25);
+                updateUploadRow(row, {
+                    percent: item.progress,
+                    status: 'uploading',
+                    note: `Menyiapkan file: ${Math.round((event.loaded / event.total) * 100)}%`
                 });
-                if(!res.ok) showToast('Upload failed', 'error');
-                resolve();
+                updateUploadOverall(dashboardState.uploadItems.length);
+            };
+            reader.readAsDataURL(file);
+            reader.onerror = () => {
+                item.progress = 100;
+                item.done = true;
+                updateUploadRow(row, {
+                    percent: 100,
+                    status: 'error',
+                    note: 'File tidak bisa dibaca dari perangkat.'
+                });
+                showToast(`Gagal membaca ${file.name}`, 'error');
+                resolve({ success: false });
+            };
+            reader.onload = () => {
+                const xhr = new XMLHttpRequest();
+                const payload = JSON.stringify({
+                    filename: file.name,
+                    contentType: file.type || 'application/octet-stream',
+                    base64: reader.result,
+                    parentId: currentFolderId
+                });
+                xhr.open('POST', '/api/upload');
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.upload.onprogress = (event) => {
+                    if (!event.lengthComputable) return;
+                    item.progress = 25 + ((event.loaded / event.total) * 70);
+                    updateUploadRow(row, {
+                        percent: item.progress,
+                        status: 'uploading',
+                        note: `Mengirim ke server: ${Math.round((event.loaded / event.total) * 100)}%`
+                    });
+                    updateUploadOverall(dashboardState.uploadItems.length);
+                };
+                xhr.onload = () => {
+                    let data = {};
+                    try {
+                        data = JSON.parse(xhr.responseText || '{}');
+                    } catch (error) {}
+
+                    item.progress = 100;
+                    item.done = true;
+
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        if (data.file && !data.duplicate) {
+                            dashboardState.stats.ownedFiles += 1;
+                            dashboardState.stats.currentUsage += Number(data.file.size || 0);
+                            appendUploadedFile(data.file);
+                            updateDashboardStatsUi();
+                        }
+                        updateUploadRow(row, {
+                            percent: 100,
+                            status: data.duplicate ? 'info' : 'success',
+                            note: data.duplicate
+                                ? 'File duplikat terdeteksi. Server mengarahkan ke file yang sudah ada.'
+                                : 'File berhasil disimpan dan kartu baru sudah masuk ke dashboard.'
+                        });
+                        showToast(data.message || `${file.name} uploaded`, data.duplicate ? 'warning' : 'success');
+                        resolve({ success: true, data });
+                        return;
+                    }
+
+                    updateUploadRow(row, {
+                        percent: 100,
+                        status: 'error',
+                        note: data.message || 'Upload gagal di server.'
+                    });
+                    showToast(data.message || `Upload gagal untuk ${file.name}`, 'error');
+                    resolve({ success: false, data });
+                };
+                xhr.onerror = () => {
+                    item.progress = 100;
+                    item.done = true;
+                    updateUploadRow(row, {
+                        percent: 100,
+                        status: 'error',
+                        note: 'Koneksi ke server terputus saat upload.'
+                    });
+                    showToast(`Upload gagal untuk ${file.name}`, 'error');
+                    resolve({ success: false });
+                };
+                xhr.send(payload);
             };
         });
     }
@@ -494,7 +1001,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${window.location.origin}/private/${linkId}`;
     }
 
-    document.querySelectorAll('.file-card').forEach(card => {
+    function attachFileCardEvents(card) {
         const trigger = card.querySelector('.context-trigger');
         card.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -507,16 +1014,33 @@ document.addEventListener('DOMContentLoaded', () => {
             const rect = trigger.getBoundingClientRect();
             openContextMenu(card, rect.right - 8, rect.bottom + 8);
         });
-    });
+    }
+
+    document.querySelectorAll('.file-card').forEach(attachFileCardEvents);
 
     document.addEventListener('click', (e) => {
         if(!e.target.closest('.context-menu')) contextMenu.style.display = 'none';
     });
     
     const allModals = document.querySelectorAll('.modal');
-    function closeModal() { allModals.forEach(m => m.classList.remove('active')); }
+    function closeModal() {
+        allModals.forEach(modal => {
+            if (modal.id === 'uploadProgressModal') {
+                closeUploadProgressModal();
+                return;
+            }
+            modal.classList.remove('active');
+        });
+    }
     allModals.forEach(modal => {
-        modal.addEventListener('click', (e) => { if(e.target === modal) closeModal(); });
+        modal.addEventListener('click', (e) => {
+            if (e.target !== modal) return;
+            if (modal.id === 'uploadProgressModal') {
+                closeUploadProgressModal();
+                return;
+            }
+            modal.classList.remove('active');
+        });
         modal.querySelector('.cancel-btn')?.addEventListener('click', closeModal);
     });
 
@@ -764,7 +1288,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const selectedIds = new Set();
-    document.querySelectorAll('.file-check').forEach(chk => {
+    function attachSelectionHandler(chk) {
+        if (!chk) return;
         chk.addEventListener('change', (e) => {
             const card = e.target.closest('.file-card');
             if (e.target.checked) { selectedIds.add(e.target.value); card.classList.add('selected'); }
@@ -773,7 +1298,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('selectedCount').textContent = selectedIds.size;
             if(selectedIds.size > 0) bar.classList.add('active'); else bar.classList.remove('active');
         });
-    });
+    }
+    document.querySelectorAll('.file-check').forEach(attachSelectionHandler);
 
     document.getElementById('emptyTrashBtn')?.addEventListener('click', async () => {
         if(!confirm('Permanently delete all files in trash?')) return;

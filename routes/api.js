@@ -153,6 +153,23 @@ function sanitizeTagList(tags) {
         .filter(Boolean);
 }
 
+function serializeDashboardFile(file) {
+    if (!file) return null;
+    return {
+        id: String(file._id),
+        originalName: file.originalName,
+        customAlias: file.customAlias,
+        contentType: file.contentType,
+        size: Number(file.size || 0),
+        isHidden: Boolean(file.isHidden),
+        isFolder: Boolean(file.isFolder),
+        isStarred: Boolean(file.isStarred),
+        downloads: Number(file.downloads || 0),
+        parentId: file.parentId ? String(file.parentId) : null,
+        createdAt: file.createdAt
+    };
+}
+
 function isFileOwner(file, userId) {
     return Boolean(file?.owner && userId && file.owner.equals && file.owner.equals(userId));
 }
@@ -832,9 +849,11 @@ router.post('/upload', async (req, res) => {
             if (duplicate) {
                 return res.status(200).json({
                     status: 'success',
+                    duplicate: true,
                     message: 'Duplicate file detected',
                     url: `${req.protocol}://${req.get('host')}/w-upload/file/${duplicate.customAlias}`,
-                    filename: duplicate.customAlias
+                    filename: duplicate.customAlias,
+                    file: serializeDashboardFile(duplicate)
                 });
             }
         }
@@ -892,7 +911,12 @@ router.post('/upload', async (req, res) => {
             });
         }
 
-        res.status(201).json({ status: 'success', url: `${req.protocol}://${req.get('host')}/w-upload/file/${finalAlias}`, filename: finalAlias });
+        res.status(201).json({
+            status: 'success',
+            url: `${req.protocol}://${req.get('host')}/w-upload/file/${finalAlias}`,
+            filename: finalAlias,
+            file: serializeDashboardFile(newFile)
+        });
     } catch (error) {
         console.error("Upload Error:", error);
         res.status(500).json({ status: 'error', message: 'Upload failed' });

@@ -49,6 +49,37 @@ async function main() {
     assert.ok(html.includes('bootImageEditor'));
     assert.ok(!html.includes("theme: 'dark'"));
 
+    const docsHtml = await ejs.renderFile(path.resolve(__dirname, '..', 'views', 'docs.ejs'), {
+        csrfToken: 'x',
+        availableLanguages: [],
+        locals: { isLoggedIn: false, currentUrl: '', systemConfig: null }
+    });
+
+    assert.ok(docsHtml.includes('Shown once on create'));
+    assert.ok(docsHtml.includes('/api/upload'));
+
+    const dashboardHtml = await ejs.renderFile(path.resolve(__dirname, '..', 'views', 'dashboard.ejs'), {
+        csrfToken: 'x',
+        availableLanguages: [],
+        query: {},
+        currentFolder: null,
+        breadcrumbs: [],
+        dashboardStats: {
+            ownedFiles: 5,
+            ownedFolders: 0,
+            sharedItems: 0,
+            totalDownloads: 2,
+            currentUsage: 1024
+        },
+        files: [],
+        user: { storageLimit: 10 * 1024 * 1024 * 1024, storageBonus: 0, storageUsed: 1024 },
+        locals: { isLoggedIn: false, currentUrl: '', systemConfig: null }
+    });
+
+    assert.ok(dashboardHtml.includes('uploadProgressModal'));
+    assert.ok(dashboardHtml.includes('statOwnedFiles'));
+    assert.ok(dashboardHtml.includes('Live Upload Queue'));
+
     console.log('security-smoke: ok');
 }
 

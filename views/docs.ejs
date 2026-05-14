@@ -23,22 +23,29 @@
 
         <section id="introduction">
             <h1>API Documentation</h1>
-            <p>w upload bisa dipakai sebagai backend file pihak ketiga untuk website lain, bot Telegram, bot Discord, WhatsApp gateway, automation, dan service internal Anda sendiri. Seluruh flow utamanya bisa dijalankan dengan API key atau sesi browser.</p>
+            <p>w upload bisa dipakai sebagai backend file untuk website lain, bot Telegram, bot Discord, WhatsApp gateway, automation, worker, dan service internal Anda sendiri. Dokumentasi ini sudah diperbarui mengikuti sistem API key baru, proteksi CSRF browser, validasi URL outbound, dan respons upload yang sekarang mengembalikan metadata file agar dashboard atau integrasi Anda bisa update tanpa reload.</p>
         </section>
 
         <section id="authentication">
             <h2><i class="fa-solid fa-key"></i> Authentication</h2>
-            <p>Gunakan salah satu metode berikut untuk setiap request yang membutuhkan otorisasi.</p>
+            <p>Gunakan metode yang sesuai dengan jenis integrasi Anda. Untuk backend server-to-server, prioritaskan API key. Untuk panel internal berbasis browser yang memakai cookie login, sertakan CSRF token.</p>
             
             <div class="feature-item">
-                <strong>Method 1: Bearer Token</strong>
+                <strong>Method 1: Browser Session + CSRF</strong>
+                <pre><code>Cookie: token=&lt;session_cookie&gt;
+X-CSRF-Token: &lt;csrf_token_from_meta_tag&gt;</code></pre>
+                <p>Cocok untuk dashboard internal, admin panel, dan request AJAX dari browser saat user sudah login.</p>
+            </div>
+
+            <div class="feature-item">
+                <strong>Method 2: Bearer Token</strong>
                 <pre><code>Authorization: Bearer &lt;your_jwt_token&gt;</code></pre>
             </div>
             
             <div class="feature-item">
-                <strong>Method 2: API Key</strong>
+                <strong>Method 3: API Key</strong>
                 <pre><code>x-api-key: &lt;your_api_key&gt;</code></pre>
-                <p>API key dibuat dari <a href="/profile">Profile</a> dan cocok untuk backend server, bot, worker, atau webhook relay.</p>
+                <p>API key dibuat dari <a href="/profile">Profile</a> dan paling cocok untuk backend server, bot, worker, cron job, atau webhook relay. Key hanya ditampilkan penuh sekali saat dibuat. Setelah itu, halaman profile hanya menampilkan prefix/masked key untuk keamanan.</p>
             </div>
         </section>
 
@@ -48,7 +55,7 @@
             <div class="api-endpoint">
                 <span class="method post">POST</span>
                 <span class="url">/api/upload</span>
-                <p>Upload file via Base64 JSON. Bisa dipakai dari website pihak ketiga, bot, webhook processor, atau custom admin panel.</p>
+                <p>Upload file via Base64 JSON. Endpoint ini cocok untuk website pihak ketiga, bot, webhook processor, atau custom admin panel. Respons sukses sekarang mengembalikan metadata file yang cukup untuk langsung merender item baru di UI tanpa reload.</p>
                 <div class="code-block">
                     <strong>Headers:</strong>
 <pre>x-api-key: YOUR_API_KEY
@@ -61,16 +68,34 @@ Content-Type: application/json</pre>
   "description": "Uploaded from Telegram bot",
   "parentId": null
 }</pre>
+                    <strong>Success Response:</strong>
+<pre>{
+  "status": "success",
+  "url": "https://wanzofc.site/w-upload/file/photo_123.jpg",
+  "filename": "photo_123.jpg",
+  "file": {
+    "id": "6823...",
+    "originalName": "photo.jpg",
+    "customAlias": "photo_123.jpg",
+    "contentType": "image/jpeg",
+    "size": 582113,
+    "isHidden": false,
+    "isFolder": false,
+    "downloads": 0,
+    "parentId": null,
+    "createdAt": "2026-05-14T10:12:00.000Z"
+  }
+}</pre>
                 </div>
             </div>
 
             <div class="api-endpoint">
                 <span class="method post">POST</span>
                 <span class="url">/api/upload/remote</span>
-                <p>Ambil file langsung dari URL pihak ketiga lalu simpan ke akun Anda.</p>
+                <p>Ambil file langsung dari URL publik pihak ketiga lalu simpan ke akun Anda. URL privat seperti <code>localhost</code>, <code>127.0.0.1</code>, metadata endpoint cloud, atau private network lain akan ditolak demi mencegah SSRF.</p>
                 <div class="code-block">
 <pre>{
-  "url": "https://example.com/video.mp4",
+  "url": "https://wanzofc.site/assets/demo/video.mp4",
   "parentId": "optional_folder_id"
 }</pre>
                 </div>
@@ -79,23 +104,23 @@ Content-Type: application/json</pre>
             <div class="api-endpoint">
                 <span class="method post">POST</span>
                 <span class="url">/api/upload/chunk/init</span>
-                <p>Mulai upload file besar secara chunk.</p>
+                <p>Mulai upload file besar secara chunk jika Anda sedang membangun uploader kustom sendiri. Untuk dashboard bawaan, upload sekarang sudah memakai modal progress real-time tanpa refresh halaman.</p>
             </div>
         </section>
 
         <section id="third-party">
             <h2><i class="fa-solid fa-plug"></i> Third-Party Integrations</h2>
-            <p>w upload sekarang siap dipakai sebagai service pihak ketiga untuk banyak channel. Pola paling umum:</p>
+            <p>w upload siap dipakai sebagai service pihak ketiga untuk banyak channel. Pola integrasi yang paling aman sekarang:</p>
             <ul class="doc-list">
-                <li><strong>Website lain:</strong> kirim file Base64 atau remote URL ke <code>/api/upload</code> menggunakan <code>x-api-key</code>.</li>
-                <li><strong>Telegram / Discord bots:</strong> ambil attachment dari bot API, ubah ke Base64 atau remote fetch, lalu kirim ke w upload.</li>
+                <li><strong>Website lain:</strong> kirim file Base64 ke <code>/api/upload</code> menggunakan <code>x-api-key</code>, lalu pakai payload <code>file</code> dari respons untuk update UI klien secara instan.</li>
+                <li><strong>Telegram / Discord bots:</strong> ambil attachment dari bot API, ubah ke Base64, lalu kirim ke w upload memakai API key server-side.</li>
                 <li><strong>WhatsApp gateway:</strong> file dari webhook WA atau middleware bisa diteruskan ke endpoint upload yang sama.</li>
-                <li><strong>Automation / worker:</strong> gunakan API key + webhook untuk sinkron status upload ke sistem asal.</li>
+                <li><strong>Automation / worker:</strong> gunakan API key + webhook untuk sinkron status upload ke sistem asal. Jangan simpan API key di frontend publik.</li>
             </ul>
 
             <div class="code-block">
-                <strong>Example Node.js relay (Telegram/Discord/WA middleware):</strong>
-<pre>const response = await fetch('https://your-domain/api/upload', {
+                <strong>Example Node.js relay:</strong>
+<pre>const response = await fetch('https://wanzofc.site/api/upload', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -108,7 +133,11 @@ Content-Type: application/json</pre>
   })
 });
 
-const result = await response.json();</pre>
+const result = await response.json();
+
+if (result.file) {
+  console.log('Uploaded:', result.file.originalName, result.url);
+}</pre>
             </div>
         </section>
 
@@ -145,15 +174,33 @@ const result = await response.json();</pre>
     "filename": "document.pdf",
     "alias": "document_1.pdf",
     "size": 102400,
-    "url": "https://your-domain/w-upload/file/document_1.pdf"
+    "url": "https://wanzofc.site/w-upload/file/document_1.pdf"
   }
 }</pre>
             </div>
-            <p>Validasi signature menggunakan header <code>X-Webhook-Signature</code> jika Anda mengisi secret webhook di profile.</p>
+            <p>Validasi signature menggunakan header <code>X-Webhook-Signature</code> jika Anda mengisi secret webhook di profile. Endpoint webhook harus berupa URL publik <code>http</code> atau <code>https</code>. URL privat seperti <code>localhost</code>, <code>127.0.0.1</code>, atau private IP tidak akan dipakai.</p>
         </section>
 
         <section id="api-keys">
             <h2><i class="fa-solid fa-fingerprint"></i> API Key Limits</h2>
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <strong>Shown once on create</strong>
+                    <p>Salin API key saat pertama kali dibuat. Setelah dialog ditutup, profile hanya menampilkan prefix/masked key.</p>
+                </div>
+                <div class="feature-item">
+                    <strong>Stored hashed at rest</strong>
+                    <p>Key baru disimpan dalam bentuk hash di database. Ini mengurangi dampak jika database bocor.</p>
+                </div>
+                <div class="feature-item">
+                    <strong>Use <code>x-api-key</code> header</strong>
+                    <p>Jangan menaruh API key di query string atau file frontend publik. Simpan di server-side secret manager.</p>
+                </div>
+                <div class="feature-item">
+                    <strong>Rotate by revoke + create</strong>
+                    <p>Jika key dicurigai bocor, revoke dari profile lalu buat key baru. Integrasi lama akan langsung berhenti bekerja.</p>
+                </div>
+            </div>
             <table class="doc-table" style="width:100%; border-collapse:collapse; margin-top:1rem;">
                 <thead>
                     <tr style="text-align:left; border-bottom:2px solid var(--border);">
@@ -181,6 +228,10 @@ const result = await response.json();</pre>
         <section id="security-features">
             <h2><i class="fa-solid fa-shield-halved"></i> Security Features</h2>
             <ul class="doc-list">
+                <li><strong>API Key Hashing:</strong> Key baru disimpan sebagai hash, bukan plaintext.</li>
+                <li><strong>CSRF for Browser APIs:</strong> Request browser berbasis cookie harus membawa CSRF token.</li>
+                <li><strong>Outbound URL Validation:</strong> Remote upload dan webhook memblokir target private network untuk mencegah SSRF.</li>
+                <li><strong>Access-Control Hardening:</strong> Route proses file penting sekarang memeriksa ownership atau collaborator access.</li>
                 <li><strong>Passkeys (WebAuthn):</strong> Login biometrik untuk perangkat modern.</li>
                 <li><strong>2FA (TOTP):</strong> Tambahan keamanan berbasis authenticator app.</li>
                 <li><strong>Session Control:</strong> Lihat dan revoke perangkat aktif dari profile.</li>
