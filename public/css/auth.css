@@ -11,8 +11,13 @@
     justify-content: center;
     align-items: center;
     min-height: calc(100vh - 73px);
+    width: 100%;
+    max-width: 100%;
     padding: 2rem 1.5rem;
     background-color: var(--bg);
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+    touch-action: pan-y;
 }
 
 .auth-card {
@@ -22,7 +27,7 @@
     box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.1);
     border: 1px solid var(--border);
     width: 100%;
-    max-width: 450px;
+    max-width: min(450px, 100%);
     position: relative;
     overflow: hidden;
     animation: fadeIn 0.5s ease-out;
@@ -85,6 +90,7 @@
 .form-input,
 .auth-form input {
     width: 100%;
+    max-width: 100%;
     padding: 0.8rem 1rem 0.8rem 2.8rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
@@ -118,6 +124,7 @@
 
 .btn-submit {
     width: 100%;
+    max-width: 100%;
     padding: 0.9rem;
     background: var(--primary);
     color: white;
@@ -132,6 +139,7 @@
     justify-content: center;
     gap: 0.5rem;
     box-shadow: 0 4px 15px -1px rgba(var(--primary-rgb), 0.25);
+    touch-action: manipulation;
 }
 
 .btn-submit:hover {
@@ -162,6 +170,7 @@
     color: var(--text);
     border: 1px solid var(--border);
     transition: all 0.2s;
+    touch-action: manipulation;
 }
 
 .btn-passkey:hover {
@@ -245,7 +254,7 @@
 @media (max-width: 480px) {
     .auth-container {
         padding: 1rem;
-        align-items: flex-start; 
+        align-items: flex-start;
         padding-top: 2.5rem;
     }
 
@@ -264,5 +273,11 @@
     .form-input, 
     .auth-form input {
         font-size: 16px;
+    }
+
+    .auth-switch,
+    .auth-footer {
+        margin-top: 1.5rem;
+        padding-top: 1.25rem;
     }
 }

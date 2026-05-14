@@ -64,6 +64,10 @@
 
 html {
     scroll-behavior: smooth;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+    overscroll-behavior-x: none;
 }
 
 body {
@@ -76,7 +80,20 @@ body {
         var(--bg);
     color: var(--text);
     min-height: 100vh;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+    position: relative;
     transition: background-color 0.35s ease, color 0.35s ease;
+}
+
+body.menu-open {
+    overflow: hidden;
+}
+
+:where(main, section, article, aside, header, footer, form, fieldset, .nav-shell, .nav-right, .nav-menu, .main-content) {
+    min-width: 0;
 }
 
 a {
@@ -197,6 +214,7 @@ img {
     align-items: center;
     gap: 1rem;
     min-width: 0;
+    position: relative;
 }
 
 .nav-menu {
@@ -674,9 +692,10 @@ textarea {
     .nav-menu {
         position: absolute;
         top: calc(100% + 10px);
-        left: 0;
         right: 0;
-        margin: 0 0.9rem;
+        left: auto;
+        width: min(calc(100vw - 1.8rem), 420px);
+        max-width: calc(100vw - 1.8rem);
         padding: 0.9rem;
         border-radius: 18px;
         border: 1px solid var(--border);
@@ -685,6 +704,7 @@ textarea {
         flex-direction: column;
         align-items: stretch;
         display: none;
+        overflow-x: hidden;
     }
 
     .nav-menu.active {
