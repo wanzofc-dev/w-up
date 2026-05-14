@@ -11,7 +11,7 @@ const LinkVisit = require('../models/linkVisit');
 const FileRequest = require('../models/fileRequest');
 const PaymentTransaction = require('../models/paymentTransaction');
 const auth = require('../middleware/auth');
-const { r2, GetObjectCommand, DeleteObjectCommand } = require('../utils/r2');
+const { r2, GetObjectCommand, DeleteObjectCommand, getR2BucketName } = require('../utils/r2');
 const { getBillingPricing } = require('../utils/billing');
 const { getMidtransConfig, getSnapScriptUrl, hasMidtransConfig } = require('../utils/midtrans');
 
@@ -525,7 +525,7 @@ router.get('/w-upload/raw/:identifier', auth.checkAuthStatus, async (req, res) =
         if (file.storageType === 'r2' && file.r2Key) {
             try {
                 const command = new GetObjectCommand({
-                    Bucket: process.env.R2_BUCKET_NAME,
+                    Bucket: getR2BucketName(),
                     Key: file.r2Key
                 });
                 
@@ -537,7 +537,7 @@ router.get('/w-upload/raw/:identifier', auth.checkAuthStatus, async (req, res) =
 
                 if (file.isBurnAfterRead) {
                     await r2.send(new DeleteObjectCommand({ 
-                        Bucket: process.env.R2_BUCKET_NAME, 
+                        Bucket: getR2BucketName(), 
                         Key: file.r2Key 
                     }));
                 }

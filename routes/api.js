@@ -22,7 +22,7 @@ const User = require('../models/user');
 const Team = require('../models/team');
 const PaymentTransaction = require('../models/paymentTransaction');
 const AiInsight = require('../models/aiInsight');
-const { r2, PutObjectCommand, GetObjectCommand } = require('../utils/r2');
+const { r2, PutObjectCommand, GetObjectCommand, getR2BucketName } = require('../utils/r2');
 const FileRequest = require('../models/fileRequest');
 const UploadSession = require('../models/uploadSession');
 const auth = require('../middleware/auth');
@@ -109,10 +109,6 @@ function validateMagicBytes(buffer, contentType) {
     return true; 
 }
 
-function getBucketName() {
-    return process.env.R2_BUCKET_NAME || 'wanzofc';
-}
-
 function isTruthy(value) {
     return value === true || value === 'true' || value === '1' || value === 1 || value === 'on';
 }
@@ -158,7 +154,7 @@ function streamToBuffer(stream) {
 
 async function getR2ObjectBuffer(key) {
     const { Body } = await r2.send(new GetObjectCommand({
-        Bucket: getBucketName(),
+        Bucket: getR2BucketName(),
         Key: key
     }));
 
@@ -168,7 +164,7 @@ async function getR2ObjectBuffer(key) {
 async function uploadBufferToR2(ownerId, alias, buffer, contentType) {
     const r2Key = `${ownerId.toString()}/${Date.now()}_${crypto.randomUUID()}_${alias}`;
     await r2.send(new PutObjectCommand({
-        Bucket: getBucketName(),
+        Bucket: getR2BucketName(),
         Key: r2Key,
         Body: buffer,
         ContentType: contentType
@@ -1812,7 +1808,7 @@ router.post('/files/:id/extract', async (req, res) => {
             await saveFileWithUniqueAlias(parentFolder, newFolderName);
         }
 
-        const { Body } = await r2.send(new GetObjectCommand({ Bucket: getBucketName(), Key: file.r2Key }));
+        const { Body } = await r2.send(new GetObjectCommand({ Bucket: getR2BucketName(), Key: file.r2Key }));
         
         const extractedFiles = [];
         const stream = Body.pipe(unzipper.Parse({ forceStream: true }));
@@ -1825,7 +1821,7 @@ router.post('/files/:id/extract', async (req, res) => {
             const r2Key = `${ownerId}/${finalAlias}`;
             
             await r2.send(new PutObjectCommand({
-                Bucket: getBucketName(), Key: r2Key, Body: buffer, ContentType: 'application/octet-stream'
+                Bucket: getR2BucketName(), Key: r2Key, Body: buffer, ContentType: 'application/octet-stream'
             }));
 
             const newFile = new File({

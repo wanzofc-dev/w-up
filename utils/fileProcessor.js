@@ -10,7 +10,7 @@ if (typeof global.DOMMatrix === 'undefined') {
 }
 // --- POLYFILL END ---
 
-const { r2, GetObjectCommand } = require('./r2');
+const { r2, GetObjectCommand, getR2BucketName } = require('./r2');
 const pdf = require('pdf-parse');
 const mammoth = require('mammoth');
 const Tesseract = require('tesseract.js');
@@ -36,7 +36,7 @@ const extractContent = async (file) => {
 
     try {
         const command = new GetObjectCommand({
-            Bucket: process.env.R2_BUCKET_NAME,
+            Bucket: getR2BucketName(),
             Key: file.r2Key
         });
         
