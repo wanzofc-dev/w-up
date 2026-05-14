@@ -16,7 +16,10 @@
         sourceLanguage: 'auto',
         processing: false,
         suspendObserver: false,
-        observer: null
+        observer: null,
+        failureCount: 0,
+        disabledUntil: 0,
+        lastErrorAt: 0
     };
     const disablePageTranslation = document.body?.dataset?.disableTranslation === 'true' || window.__disablePageTranslation === true;
 
@@ -186,6 +189,10 @@
             return texts;
         }
 
+        if (translationState.disabledUntil && Date.now() < translationState.disabledUntil) {
+            throw new Error('Translation temporarily paused.');
+        }
+
         const response = await fetch('/api/i18n/translate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -259,7 +266,17 @@
             if (translatedTitle) document.title = translatedTitle;
         } catch (error) {
             console.error('Global page translation error:', error);
-            showToast('Translation failed for this page.', 'error');
+            translationState.failureCount += 1;
+            translationState.lastErrorAt = Date.now();
+
+            if (translationState.failureCount >= 3) {
+                translationState.disabledUntil = Date.now() + 60000;
+            }
+
+            if (!translationState.__errorToastShown || Date.now() - translationState.__errorToastShown > 15000) {
+                translationState.__errorToastShown = Date.now();
+                showToast('Translation failed for this page.', 'error');
+            }
         } finally {
             translationState.processing = false;
             setTimeout(() => {
@@ -286,6 +303,8 @@
         languageSwitcher.value = translationState.language;
         languageSwitcher.addEventListener('change', async () => {
             translationState.language = languageSwitcher.value;
+            translationState.failureCount = 0;
+            translationState.disabledUntil = 0;
             localStorage.setItem('ui-language', translationState.language);
             await translateDocument(document.body);
         });

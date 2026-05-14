@@ -1,5 +1,7 @@
 const axios = require('axios');
 const translationCache = new Map();
+const BATCH_SEPARATOR = '\n__WU_TRANSLATION_SPLIT__\n';
+const BATCH_CACHE_LIMIT = 1000;
 
 const languages = [
     { code: 'id', name: 'Indonesian' },
@@ -75,9 +77,72 @@ async function translateText(text, targetLang, sourceLang = 'auto') {
     }
 }
 
+async function requestGoogleTranslation(text, targetLang, sourceLang = 'auto') {
+    const encodedText = encodeURIComponent(text);
+    const url = `https://translate.google.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodedText}`;
+
+    const response = await axios.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        timeout: 10000
+    });
+
+    if (response.data && response.data[0]) {
+        return response.data[0].map(item => item[0]).join('');
+    }
+
+    return text;
+}
+
 async function translateBatch(texts, targetLang, sourceLang = 'auto') {
     if (!Array.isArray(texts) || !texts.length) return [];
-    return Promise.all(texts.map(text => translateText(text, targetLang, sourceLang)));
+
+    const normalizedTexts = texts.map(text => (typeof text === 'string' ? text : ''));
+    const indexedPending = [];
+    const results = new Array(normalizedTexts.length);
+
+    normalizedTexts.forEach((text, index) => {
+        const cacheKey = `${text}_${targetLang}_${sourceLang}`;
+        if (!text) {
+            results[index] = '';
+            return;
+        }
+
+        if (translationCache.has(cacheKey)) {
+            results[index] = translationCache.get(cacheKey);
+            return;
+        }
+
+        indexedPending.push({ index, text, cacheKey });
+    });
+
+    if (!indexedPending.length) {
+        return results;
+    }
+
+    try {
+        const mergedText = indexedPending.map(item => item.text).join(BATCH_SEPARATOR);
+        const translatedMergedText = await requestGoogleTranslation(mergedText, targetLang, sourceLang);
+        const translatedParts = translatedMergedText.split(BATCH_SEPARATOR);
+
+        if (translatedParts.length === indexedPending.length) {
+            indexedPending.forEach((item, offset) => {
+                const translated = translatedParts[offset] || item.text;
+                translationCache.set(item.cacheKey, translated);
+                results[item.index] = translated;
+            });
+
+            if (translationCache.size > BATCH_CACHE_LIMIT) translationCache.clear();
+            return results.map((value, index) => value ?? normalizedTexts[index]);
+        }
+    } catch (error) {
+        console.error('Batch Translation Error:', error.message);
+    }
+
+    for (const item of indexedPending) {
+        results[item.index] = await translateText(item.text, targetLang, sourceLang);
+    }
+
+    return results.map((value, index) => value ?? normalizedTexts[index]);
 }
 
 module.exports = { translateText, translateBatch, languages };
