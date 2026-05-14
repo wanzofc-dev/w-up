@@ -32,6 +32,13 @@ const PLAN_CATALOG = Object.freeze({
   }
 });
 
+function applyPlanToUser(user, plan = 'free') {
+  const summary = getPlanSummary(plan);
+  user.plan = summary.key;
+  user.storageLimit = summary.storageLimit;
+  return user;
+}
+
 function getBillingPricing() {
   return {
     monthlyPrice: PRO_MONTHLY_PRICE,
@@ -51,14 +58,42 @@ function getPlanSummary(plan = 'free') {
   return PLAN_CATALOG[plan] || PLAN_CATALOG.free;
 }
 
+function hasProPlanAccess(user) {
+  return Boolean(user && user.plan === 'pro');
+}
+
+async function downgradeToFreePlan(user) {
+  applyPlanToUser(user, 'free');
+  user.subscriptionCycle = 'monthly';
+  user.subscriptionExpiresAt = null;
+  await user.save();
+  return user;
+}
+
+async function syncUserPlanState(user) {
+  if (!user) return user;
+  if (user.plan !== 'pro') {
+    applyPlanToUser(user, 'free');
+    return user;
+  }
+
+  const expiry = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt).getTime() : 0;
+  if (!expiry || expiry <= Date.now()) {
+    await downgradeToFreePlan(user);
+    return user;
+  }
+
+  applyPlanToUser(user, 'pro');
+  return user;
+}
+
 async function activateProPlan(user, billingCycle = 'monthly') {
   const durationDays = billingCycle === 'yearly' ? 365 : 30;
   const now = Date.now();
   const currentExpiry = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt).getTime() : 0;
   const baseTimestamp = currentExpiry > now ? currentExpiry : now;
 
-  user.plan = 'pro';
-  user.storageLimit = PRO_STORAGE_LIMIT;
+  applyPlanToUser(user, 'pro');
   user.subscriptionCycle = billingCycle;
   user.lastPaymentAt = new Date();
   user.subscriptionExpiresAt = new Date(baseTimestamp + durationDays * 24 * 60 * 60 * 1000);
@@ -74,5 +109,9 @@ module.exports = {
   getBillingAmount,
   getPlanCatalog,
   getPlanSummary,
+  hasProPlanAccess,
+  applyPlanToUser,
+  downgradeToFreePlan,
+  syncUserPlanState,
   activateProPlan
 };

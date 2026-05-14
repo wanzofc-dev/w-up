@@ -108,7 +108,7 @@
             <div class="docs-hero-copy">
                 <span class="docs-eyebrow">Production-Ready Integration</span>
                 <h1>Developer docs yang sekarang lebih cocok dipakai untuk integrasi nyata, bukan sekadar demo endpoint.</h1>
-                <p>w upload sekarang punya API key yang lebih aman, billing sync Midtrans, AI workflow, webhook delivery log, chunk upload, remote upload, dan control file private/public yang ditegakkan di backend. Halaman ini merangkum stack integrasi developer yang benar-benar hidup di aplikasi.</p>
+                <p>Surface developer di w upload sekarang terasa jauh lebih matang: API key lebih aman, billing Midtrans tersinkron, workflow AI aktif, webhook punya delivery log, upload besar berjalan rapi, dan aturan file private atau public benar-benar ditegakkan di backend. Halaman ini merangkum semuanya dalam satu alur yang enak dibaca.</p>
                 <div class="docs-hero-actions">
                     <a href="/profile" class="btn primary-btn">
                         <i class="fa-solid fa-key"></i> Open Profile
@@ -234,7 +234,7 @@ X-CSRF-Token: &lt;csrf_token_from_meta_tag&gt;</code></pre>
                 <article class="endpoint-card">
                     <div class="endpoint-head">
                         <span class="method post">POST</span>
-                        <span class="url">/api/upload/chunk/init → /chunk → /finalize</span>
+                        <span class="url">/api/upload/chunk/init -> /chunk -> /finalize</span>
                     </div>
                     <p>Flow multipart upload untuk file besar. Dashboard bawaan juga memakai pola ini agar file besar tidak memaksa satu request Base64 besar.</p>
 <pre class="code-block"><code>POST /api/upload/chunk/init
@@ -385,8 +385,8 @@ POST /api/upload/chunk/finalize</code></pre>
         align-self: start;
         border-radius: 28px;
         border: 1px solid var(--border);
-        background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(241,245,249,0.9));
-        box-shadow: 0 24px 46px rgba(15, 23, 42, 0.08);
+        background: linear-gradient(180deg, rgba(239,246,255,0.96), rgba(224,242,254,0.92));
+        box-shadow: 0 24px 46px rgba(37, 99, 235, 0.10);
         overflow: hidden;
     }
     .docs-nav {
@@ -425,7 +425,7 @@ POST /api/upload/chunk/finalize</code></pre>
     .docs-nav a:hover,
     .docs-nav a.active {
         color: var(--text);
-        background: rgba(15, 23, 42, 0.06);
+        background: linear-gradient(135deg, rgba(59,130,246,0.14), rgba(249,115,22,0.12));
         transform: translateX(2px);
     }
     .docs-content {
@@ -452,10 +452,11 @@ POST /api/upload/chunk/finalize</code></pre>
         border-radius: 32px;
         color: #fff;
         background:
-            radial-gradient(circle at top right, rgba(249,115,22,0.22), transparent 26%),
-            linear-gradient(135deg, rgba(15,23,42,0.98), rgba(37,99,235,0.94));
-        border: 1px solid rgba(255,255,255,0.1);
-        box-shadow: 0 30px 60px rgba(15, 23, 42, 0.16);
+            radial-gradient(circle at top right, rgba(251,146,60,0.22), transparent 28%),
+            radial-gradient(circle at bottom left, rgba(125,211,252,0.18), transparent 32%),
+            linear-gradient(135deg, rgba(20,45,99,0.98), rgba(37,99,235,0.88));
+        border: 1px solid rgba(191,219,254,0.22);
+        box-shadow: 0 30px 60px rgba(37, 99, 235, 0.18);
     }
     .docs-hero h1 {
         margin: 0.9rem 0 0.8rem;
@@ -529,9 +530,9 @@ POST /api/upload/chunk/finalize</code></pre>
     .docs-section {
         padding: 1.6rem;
         border-radius: 28px;
-        background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94));
+        background: linear-gradient(180deg, rgba(248,252,255,0.98), rgba(238,247,255,0.95));
         border: 1px solid var(--border);
-        box-shadow: 0 22px 42px rgba(15, 23, 42, 0.06);
+        box-shadow: 0 22px 42px rgba(37, 99, 235, 0.07);
     }
     .section-heading {
         margin-bottom: 1.2rem;
@@ -684,7 +685,7 @@ POST /api/upload/chunk/finalize</code></pre>
         padding-left: 0;
     }
     .branding-card.alt {
-        background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,247,237,0.96));
+        background: linear-gradient(180deg, rgba(245,251,255,0.98), rgba(255,247,237,0.96));
     }
     .developer-center-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -712,7 +713,7 @@ POST /api/upload/chunk/finalize</code></pre>
     .sidebar-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(2, 6, 23, 0.52);
+        background: rgba(15, 23, 42, 0.46);
         backdrop-filter: blur(3px);
         z-index: 90;
         display: none;

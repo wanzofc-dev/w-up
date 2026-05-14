@@ -91,15 +91,29 @@ router.get('/docs', auth.checkAuthStatus, (req, res) => {
 
 router.get('/developer', auth.protectView, async (req, res) => {
     try {
-        const [storageSnapshot, recentLogs, recentTransactions] = await Promise.all([
-            getUserStorageSnapshot(req.user._id),
-            DeveloperRequestLog.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(12).lean(),
-            PaymentTransaction.find({ user: req.user._id })
+        const storageSnapshot = await getUserStorageSnapshot(req.user._id);
+
+        let recentLogs = [];
+        let recentTransactions = [];
+
+        try {
+            recentLogs = await DeveloperRequestLog.find({ user: req.user._id })
+                .sort({ createdAt: -1 })
+                .limit(12)
+                .lean();
+        } catch (error) {
+            console.error('Developer center logs load error:', error.message);
+        }
+
+        try {
+            recentTransactions = await PaymentTransaction.find({ user: req.user._id })
                 .sort({ createdAt: -1 })
                 .limit(6)
                 .select('orderId amount billingCycle status paymentMethod createdAt')
-                .lean()
-        ]);
+                .lean();
+        } catch (error) {
+            console.error('Developer center transactions load error:', error.message);
+        }
 
         res.render('developer_center', {
             storageSnapshot,
@@ -110,6 +124,7 @@ router.get('/developer', auth.protectView, async (req, res) => {
             brandingAvailable: hasProPlanAccess(req.user)
         });
     } catch (error) {
+        console.error('Developer center page error:', error.message);
         res.status(500).send('Error loading developer center.');
     }
 });

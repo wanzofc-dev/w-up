@@ -815,14 +815,29 @@ router.get('/dashboard/summary', auth.protectApi, async (req, res) => {
 
 router.get('/developer/overview', auth.protectApi, async (req, res) => {
     try {
-        const [storage, recentLogs, paidTransactions] = await Promise.all([
-            getUserStorageSnapshot(req.user._id),
-            DeveloperRequestLog.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(12).lean(),
-            PaymentTransaction.countDocuments({ user: req.user._id, status: 'paid' })
-        ]);
+        const storage = await getUserStorageSnapshot(req.user._id);
+
+        let recentLogs = [];
+        let paidTransactions = 0;
+
+        try {
+            recentLogs = await DeveloperRequestLog.find({ user: req.user._id })
+                .sort({ createdAt: -1 })
+                .limit(12)
+                .lean();
+        } catch (error) {
+            console.error('Developer overview logs error:', error.message);
+        }
+
+        try {
+            paidTransactions = await PaymentTransaction.countDocuments({ user: req.user._id, status: 'paid' });
+        } catch (error) {
+            console.error('Developer overview payments error:', error.message);
+        }
 
         const featureCounts = recentLogs.reduce((acc, item) => {
-            acc[item.feature] = (acc[item.feature] || 0) + 1;
+            const featureName = item && item.feature ? item.feature : 'unknown';
+            acc[featureName] = (acc[featureName] || 0) + 1;
             return acc;
         }, {});
 
@@ -850,6 +865,7 @@ router.get('/developer/overview', auth.protectApi, async (req, res) => {
             endpoints: DEVELOPER_CENTER_ENDPOINTS
         });
     } catch (error) {
+        console.error('Developer overview error:', error.message);
         res.status(500).json({ message: 'Failed to load developer overview.' });
     }
 });
@@ -859,6 +875,7 @@ router.get('/developer/logs', auth.protectApi, async (req, res) => {
         const logs = await DeveloperRequestLog.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(40).lean();
         res.json({ logs });
     } catch (error) {
+        console.error('Developer logs endpoint error:', error.message);
         res.status(500).json({ message: 'Failed to load developer logs.' });
     }
 });
