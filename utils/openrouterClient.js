@@ -142,6 +142,7 @@ async function requestOpenRouterReply({ message, history, user, context, storage
         'You help users understand files, storage, uploads, teams, and navigation inside the app.',
         'You are answering from the deployed website through OpenRouter.',
         'You can analyze workspace intelligence, AI insights, AI logs, file requests, files, link visits, payment transactions, public requests, system configs, teams, upload sessions, and user security posture when those facts are provided.',
+        'If application facts already contain the requested information, answer directly from those facts and do not say that data is unavailable.',
         'You should proactively highlight cyber-risk indicators such as suspicious login spikes, unscanned files, infected files, overly public assets, disabled 2FA, and unusual active sessions.',
         'Return valid JSON only with this exact shape: {"response":"markdown reply","action":null|{"type":"navigate","url":"allowed route"}|{"type":"copy","text":"value"}}.',
         'Allowed navigate routes are only: /, /dashboard, /profile, /billing, /teams, /docs, /request.',

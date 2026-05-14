@@ -14,6 +14,14 @@ const { getUserStorageSnapshot } = require('../utils/storage');
 
 const readOnlyConn = mongoose.createConnection(process.env.MONGO_URI);
 
+function formatStorageAmount(bytes = 0) {
+    const value = Number(bytes || 0);
+    if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
+    return `${value.toFixed(0)} B`;
+}
+
 const AI_SCHEMA_MAP = {
     User: 'username, email, role, plan, storageUsed, storageLimit, storageBonus, isVerified, sessions, failedLogins, createdAt',
     File: 'originalName, size, contentType, downloads, virusScan, isHidden, password, tags, deletedAt, createdAt',
@@ -45,9 +53,9 @@ const getStorageStats = async (userId) => {
     const storage = await getUserStorageSnapshot(userId);
     return {
         files: storage.fileCount,
-        used: (storage.used / 1024 / 1024).toFixed(2) + ' MB',
-        limit: (storage.total / 1024 / 1024 / 1024).toFixed(2) + ' GB',
-        available: (storage.available / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+        used: formatStorageAmount(storage.used),
+        limit: formatStorageAmount(storage.total),
+        available: formatStorageAmount(storage.available),
         percentage: storage.percentage.toFixed(1) + '%',
         plan: user.plan
     };
@@ -197,6 +205,54 @@ const getActivityLog = async (userId) => {
     ).join('\n');
 };
 
+const formatWorkspaceSecurityReport = (intel) => {
+    if (!intel) return 'Data keamanan workspace belum tersedia.';
+
+    const risks = [];
+    if (intel.security.failedLoginAttempts24h > 0) risks.push(`Terdapat **${intel.security.failedLoginAttempts24h}** percobaan login gagal dalam 24 jam terakhir.`);
+    if (intel.security.unscannedFiles > 0) risks.push(`Ada **${intel.security.unscannedFiles}** file yang belum discan malware.`);
+    if (intel.security.infectedFiles > 0) risks.push(`Ada **${intel.security.infectedFiles}** file yang ditandai terinfeksi.`);
+    if (intel.security.publicUnprotectedFiles > 0) risks.push(`Ada **${intel.security.publicUnprotectedFiles}** file publik tanpa proteksi password.`);
+    if (!intel.security.twoFactorEnabled) risks.push('2FA belum aktif untuk akun ini.');
+    if (intel.security.activeSessions > 3) risks.push(`Sesi aktif cukup banyak: **${intel.security.activeSessions}** device/session.`);
+
+    const fallback = 'Tidak ada indikator kritis yang menonjol saat ini, tetapi tetap disarankan scan file rutin dan aktifkan 2FA.';
+    const recommendations = [
+        intel.security.unscannedFiles > 0 ? 'Jalankan scan pada file yang belum diperiksa.' : null,
+        intel.security.publicUnprotectedFiles > 0 ? 'Lindungi file publik sensitif dengan password atau ubah ke private.' : null,
+        !intel.security.twoFactorEnabled ? 'Aktifkan 2FA di halaman profile.' : null,
+        intel.security.activeSessions > 3 ? 'Audit session aktif dan logout device yang tidak dikenal.' : null
+    ].filter(Boolean);
+
+    return [
+        '**Posture keamanan akun**',
+        risks.length ? risks.map(item => `- ${item}`).join('\n') : fallback,
+        recommendations.length ? `\n**Langkah perbaikan**\n${recommendations.map(item => `- ${item}`).join('\n')}` : ''
+    ].join('\n\n');
+};
+
+const formatWorkspaceRiskSummary = (intel) => {
+    if (!intel) return 'Risiko cyber utama belum dapat dihitung.';
+
+    if (intel.security.infectedFiles > 0) {
+        return `Risiko cyber paling penting saat ini adalah **file terinfeksi**. Terdeteksi **${intel.security.infectedFiles}** file dengan status malware/infected. Prioritas: isolasi file, nonaktifkan share link, lalu lakukan review manual.`;
+    }
+
+    if (intel.security.publicUnprotectedFiles > 0) {
+        return `Risiko cyber paling penting saat ini adalah **file publik tanpa proteksi**. Ada **${intel.security.publicUnprotectedFiles}** file yang dapat diakses publik tanpa password. Prioritas: ubah visibility atau tambahkan password.`;
+    }
+
+    if (intel.security.unscannedFiles > 0) {
+        return `Risiko cyber paling penting saat ini adalah **file belum discan**. Ada **${intel.security.unscannedFiles}** file yang belum melewati pemeriksaan keamanan. Prioritas: jalankan malware scan dan review file yang baru diupload.`;
+    }
+
+    if (!intel.security.twoFactorEnabled) {
+        return 'Risiko cyber paling penting saat ini adalah **2FA belum aktif**. Jika cookie atau password bocor, akun lebih mudah diambil alih. Prioritas: aktifkan 2FA di halaman profile.';
+    }
+
+    return 'Risiko cyber utama saat ini tergolong rendah. Tetap pantau upload baru, session aktif, dan file publik secara berkala.';
+};
+
 module.exports = {
     readOnlyConn,
     AI_SCHEMA_MAP,
@@ -204,6 +260,9 @@ module.exports = {
     getUserProfile,
     getStorageStats,
     getWorkspaceIntelligence,
+    formatStorageAmount,
+    formatWorkspaceSecurityReport,
+    formatWorkspaceRiskSummary,
     searchUsers,
     getTeamData,
     getActivityLog

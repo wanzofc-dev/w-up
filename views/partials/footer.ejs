@@ -49,6 +49,14 @@
         return `${(Number(bytes || 0) / 1024 / 1024 / 1024).toFixed(2)} GB`;
     }
 
+    function formatStorageAmount(bytes) {
+        const value = Number(bytes || 0);
+        if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+        if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
+        return `${value.toFixed(0)} B`;
+    }
+
     function initializeDashboardShell() {
         const sidebar = document.getElementById('mainSidebar');
         const sidebarOverlay = document.getElementById('sidebarOverlay');
@@ -91,27 +99,27 @@
 
             storageFill.style.width = `${data.percentage || 0}%`;
             storagePercent.textContent = `${Number(data.percentage || 0).toFixed(1)}%`;
-            storageMeta.textContent = `${formatStorageGigabytes(data.used)} / ${formatStorageGigabytes(data.total)}`;
+            storageMeta.textContent = `${formatStorageAmount(data.used)} / ${formatStorageAmount(data.total)}`;
             storageMeta.dataset.storageUsed = data.used;
             storageMeta.dataset.storageTotal = data.total;
             storageMeta.dataset.storageAvailable = data.available;
             if (storageAvailableLabel) {
-                storageAvailableLabel.textContent = `Tersedia ${formatStorageGigabytes(data.available)}`;
+                storageAvailableLabel.textContent = `Tersedia ${formatStorageAmount(data.available)}`;
             }
             if (heroStorageUsage) {
-                heroStorageUsage.textContent = `${formatStorageGigabytes(data.used)} / ${formatStorageGigabytes(data.total)}`;
+                heroStorageUsage.textContent = `${formatStorageAmount(data.used)} / ${formatStorageAmount(data.total)}`;
             }
             if (heroStorageAvailable) {
-                heroStorageAvailable.textContent = `Sisa ${formatStorageGigabytes(data.available)}`;
+                heroStorageAvailable.textContent = `Sisa ${formatStorageAmount(data.available)}`;
             }
             if (heroStorageFill) {
                 heroStorageFill.style.width = `${data.percentage || 0}%`;
             }
             if (statStorageUsed) {
-                statStorageUsed.textContent = formatStorageGigabytes(data.used);
+                statStorageUsed.textContent = formatStorageAmount(data.used);
             }
             if (statStorageDetail) {
-                statStorageDetail.textContent = `${formatStorageGigabytes(data.used)} / ${formatStorageGigabytes(data.total)} tersinkron. Tersedia ${formatStorageGigabytes(data.available)}.`;
+                statStorageDetail.textContent = `${formatStorageAmount(data.used)} / ${formatStorageAmount(data.total)} tersinkron. Tersedia ${formatStorageAmount(data.available)}.`;
             }
         } catch (error) {}
     }

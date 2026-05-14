@@ -1,4 +1,13 @@
 <aside class="sidebar" id="mainSidebar">
+    <%
+        function formatSidebarStorage(bytes) {
+            const value = Number(bytes || 0);
+            if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+            if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+            if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
+            return `${value.toFixed(0)} B`;
+        }
+    %>
     <div class="sidebar-header-mobile">
         <h3>Menu</h3>
         <button class="icon-btn" id="closeSidebarBtn"><i class="fa-solid fa-times"></i></button>
@@ -63,8 +72,8 @@
             data-storage-used="<%= used %>"
             data-storage-total="<%= totalLimit %>"
             data-storage-available="<%= available %>">
-            <%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB
+            <%= formatSidebarStorage(used) %> / <%= formatSidebarStorage(totalLimit) %>
         </small>
-        <small id="storageAvailableLabel">Tersedia <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB</small>
+        <small id="storageAvailableLabel">Tersedia <%= formatSidebarStorage(available) %></small>
     </div>
 </aside>

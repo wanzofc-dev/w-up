@@ -36,11 +36,11 @@
 </div>
 
 <style>
-    #ai-widget-container { position: fixed; bottom: 25px; right: 25px; z-index: 10000; font-family: system-ui, -apple-system, sans-serif; }
+    #ai-widget-container { position: fixed; bottom: 24px; right: 24px; z-index: 10000; font-family: system-ui, -apple-system, sans-serif; }
     #ai-toggle-btn { width: 60px; height: 60px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), #6366f1); color: white; border: none; font-size: 24px; cursor: pointer; box-shadow: 0 8px 20px rgba(79, 70, 229, 0.3); transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); display: flex; align-items: center; justify-content: center; position: relative; }
     #ai-toggle-btn:hover { transform: scale(1.1) rotate(10deg); }
     .ai-toggle-badge { position: absolute; top: -2px; right: -2px; min-width: 22px; height: 22px; border-radius: 999px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; background: #ef4444; color: white; font-size: 0.74rem; font-weight: 800; border: 2px solid white; }
-    #ai-chat-window { width: 380px; height: 600px; background: var(--card); border: 1px solid var(--border); border-radius: 20px; position: absolute; bottom: 80px; right: 0; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.2); overflow: hidden; opacity: 0; pointer-events: none; transform: translateY(20px) scale(0.95); transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: bottom right; }
+    #ai-chat-window { width: min(420px, calc(100vw - 32px)); height: min(680px, calc(100vh - 120px)); background: var(--card); border: 1px solid var(--border); border-radius: 24px; position: absolute; bottom: 80px; right: 0; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.2); overflow: hidden; opacity: 0; pointer-events: none; transform: translateY(20px) scale(0.95); transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: bottom right; }
     #ai-chat-window:not(.hidden) { opacity: 1; pointer-events: all; transform: translateY(0) scale(1); }
     .ai-header { padding: 16px; background: linear-gradient(135deg, var(--primary), #6366f1); color: white; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
     .ai-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 1rem; }
@@ -48,7 +48,7 @@
     #ai-close-btn { background: none; border: none; color: white; font-size: 18px; cursor: pointer; transition: transform 0.2s; }
     #ai-close-btn:hover { transform: rotate(90deg); }
     #ai-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; background: var(--bg); scroll-behavior: smooth; }
-    .ai-msg { max-width: 85%; padding: 12px 16px; border-radius: 16px; font-size: 0.95rem; line-height: 1.5; word-wrap: break-word; position: relative; animation: slideUp 0.3s ease; }
+    .ai-msg { max-width: min(88%, 100%); padding: 12px 16px; border-radius: 16px; font-size: 0.95rem; line-height: 1.6; word-wrap: break-word; overflow-wrap: anywhere; position: relative; animation: slideUp 0.3s ease; }
     @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     .ai-msg.bot { background: var(--bg-secondary); color: var(--text); align-self: flex-start; border-bottom-left-radius: 4px; border: 1px solid var(--border); }
     .ai-msg.user { background: var(--primary); color: white; align-self: flex-end; border-bottom-right-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -78,8 +78,14 @@
     .active-dislike { color: #ef4444 !important; opacity: 1 !important; }
     .hidden { display: none !important; }
 
+    @media (max-width: 768px) {
+        #ai-widget-container { right: 16px; bottom: 16px; }
+        #ai-chat-window { width: min(calc(100vw - 16px), 100vw - 16px); height: min(calc(100vh - 96px), 720px); right: 0; }
+        .ai-suggestions { padding: 10px 12px; }
+        .ai-input-area { padding: 12px; }
+    }
+
     @media (max-width: 480px) {
-        #ai-widget-container { right: 20px; bottom: 20px; }
         #ai-chat-window { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; border-radius: 0; z-index: 99999; transform-origin: center; }
         .ai-header { padding: 15px 20px; padding-top: max(15px, env(safe-area-inset-top)); }
         .ai-input-area { padding-bottom: max(15px, env(safe-area-inset-bottom)); }
@@ -174,7 +180,7 @@
             if (type === 'bot' && logId) {
                 const fbDiv = document.createElement('div');
                 fbDiv.className = 'ai-feedback';
-                fbDiv.innerHTML = `<button onclick="rateMsg(this, '${logId}', 'like')"><i class="fa-regular fa-thumbs-up"></i></button><button onclick="rateMsg(this, '${logId}', 'dislike')"><i class="fa-regular fa-thumbs-down"></i></button>`;
+                fbDiv.innerHTML = `<button type="button" data-log-id="${logId}" data-feedback="like" aria-label="Like response"><i class="fa-regular fa-thumbs-up"></i></button><button type="button" data-log-id="${logId}" data-feedback="dislike" aria-label="Dislike response"><i class="fa-regular fa-thumbs-down"></i></button>`;
                 div.appendChild(fbDiv);
             }
             msgs.appendChild(div);
@@ -228,7 +234,7 @@
             }
         };
 
-        window.rateMsg = (btn, id, type) => {
+        const rateMsg = (btn, id, type) => {
             const parent = btn.parentElement;
             parent.querySelectorAll('button').forEach(b => {
                 b.disabled = true;
@@ -240,6 +246,15 @@
             btn.classList.add(type === 'like' ? 'active-like' : 'active-dislike');
             fetch(`/api/ai/feedback/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type }) }).catch(console.error);
         };
+
+        msgs.addEventListener('click', event => {
+            const button = event.target.closest('.ai-feedback button');
+            if (!button) return;
+            const logId = button.dataset.logId;
+            const feedbackType = button.dataset.feedback;
+            if (!logId || !feedbackType) return;
+            rateMsg(button, logId, feedbackType);
+        });
 
         const getContext = () => {
             const errorEl = document.querySelector('.alert-danger, .error-message, .toast.error');

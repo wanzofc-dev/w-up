@@ -14,7 +14,7 @@ const { getDocsContent } = require('../utils/docsLoader');
 const { r2, GetObjectCommand } = require('../utils/r2');
 const auth = require('../middleware/auth');
 const { aiSecurityGuard } = require('../middleware/aiSecurity');
-const { getUserProfile, getStorageStats, getWorkspaceIntelligence, searchUsers, getTeamData, getActivityLog, AI_SCHEMA_MAP } = require('../utils/aiHelpers');
+const { getUserProfile, getStorageStats, getWorkspaceIntelligence, formatWorkspaceSecurityReport, formatWorkspaceRiskSummary, searchUsers, getTeamData, getActivityLog, AI_SCHEMA_MAP } = require('../utils/aiHelpers');
 const { formatFileResults, parseDateRange, searchFileContent, findSimilarFilesByName } = require('../utils/aiSearchHelpers');
 const { isOpenRouterEnabled, requestOpenRouterReply } = require('../utils/openrouterClient');
 
@@ -388,8 +388,37 @@ router.post('/chat', auth.protectApi, aiSecurityGuard, async (req, res) => {
             responseText = "Your trash bin has been emptied.";
         }
         
-        else if (cleanMsg.includes('who am i')) { responseText = `Hello **${(await getUserProfile(userId)).username}**!`; }
-        else if (cleanMsg.includes('storage')) { const s = await getStorageStats(userId); responseText = `Used: **${s.used}** of **${s.limit}**`; }
+        else if (cleanMsg.includes('who am i')) {
+            const profile = await getUserProfile(userId);
+            responseText = `Halo, **${profile.username}**.\n\nPlan: **${profile.plan || 'free'}**\nRole: **${profile.role || 'user'}**`;
+        }
+        else if (cleanMsg.includes('storage')) {
+            const s = await getStorageStats(userId);
+            responseText = `Storage terpakai **${s.used}** dari **${s.limit}**.\n\nSisa kapasitas: **${s.available}**\nPemakaian saat ini: **${s.percentage}**\nJumlah file aktif: **${s.files}**`;
+        }
+        else if (/ai insights|latest insights|ringkas ai insights|insight terbaru/.test(cleanMsg)) {
+            const insights = await AiInsight.find({ user: userId }).sort({ createdAt: -1 }).limit(3).lean();
+            responseText = insights.length
+                ? `**AI insights terbaru**\n\n${insights.map(item => `- **${item.title}**: ${item.summary}`).join('\n')}`
+                : 'Belum ada AI insight terbaru untuk akun ini.';
+        }
+        else if (/security posture|posture keamanan|keamanan akun|security account/.test(cleanMsg)) {
+            const intel = await getWorkspaceIntelligence(userId);
+            responseText = formatWorkspaceSecurityReport(intel);
+        }
+        else if (/risiko cyber|cyber risk|biggest risk|security risk/.test(cleanMsg)) {
+            const intel = await getWorkspaceIntelligence(userId);
+            responseText = formatWorkspaceRiskSummary(intel);
+        }
+        else if (/most downloaded|paling banyak diunduh|most frequent download/.test(cleanMsg)) {
+            const files = await File.find({ owner: userId, deletedAt: null, isFolder: false })
+                .sort({ downloads: -1, createdAt: -1 })
+                .limit(5)
+                .select('originalName downloads size contentType');
+            responseText = files.length
+                ? `**File paling banyak diunduh**\n\n${files.map((file, index) => `${index + 1}. **${file.originalName}** — ${file.downloads || 0} download`).join('\n')}`
+                : 'Belum ada file yang bisa dianalisis untuk statistik download.';
+        }
         else if (cleanMsg.includes('activity')) { responseText = `**Recent Activity:**\n${await getActivityLog(userId)}`; }
         else if (cleanMsg.includes('team')) { responseText = `**Team Info:**\n${await getTeamData(userId)}`; }
         else if (cleanMsg.startsWith('search user')) { responseText = `**Search Results:**\n${await searchUsers(cleanMsg.replace('search user', '').trim(), userRole)}`; }

@@ -1,6 +1,15 @@
 <%- include('partials/header', { title: 'Dashboard', pageCss: 'dashboard' }) %>
 
 <div class="dashboard-layout">
+    <% 
+        function formatStorageDisplay(bytes) {
+            const value = Number(bytes || 0);
+            if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+            if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+            if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
+            return `${value.toFixed(0)} B`;
+        }
+    %>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
     <aside class="sidebar" id="mainSidebar">
@@ -56,9 +65,9 @@
             </div>
             <div class="progress-bar"><div class="fill" id="storageFill" style="width: <%= percentage %>%;"></div></div>
             <small id="storageMeta" data-storage-used="<%= used %>" data-storage-total="<%= totalLimit %>" data-storage-available="<%= available %>">
-                <%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB
+                <%= formatStorageDisplay(used) %> / <%= formatStorageDisplay(totalLimit) %>
             </small>
-            <small id="storageAvailableLabel">Tersedia <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB</small>
+            <small id="storageAvailableLabel">Tersedia <%= formatStorageDisplay(available) %></small>
         </div>
     </aside>
 
@@ -110,8 +119,8 @@
                 <div class="hero-storage-strip">
                     <div>
                         <small>Storage capacity</small>
-                        <strong id="heroStorageUsage"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB</strong>
-                        <span id="heroStorageAvailable">Sisa <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB</span>
+                        <strong id="heroStorageUsage"><%= formatStorageDisplay(used) %> / <%= formatStorageDisplay(totalLimit) %></strong>
+                        <span id="heroStorageAvailable">Sisa <%= formatStorageDisplay(available) %></span>
                     </div>
                     <div class="hero-storage-rail">
                         <div class="hero-storage-fill" id="heroStorageFill" style="width: <%= percentage %>%;"></div>
@@ -136,8 +145,8 @@
                 </article>
                 <article class="hero-stat-card">
                     <small>Storage used</small>
-                    <strong id="statStorageUsed" data-bytes="<%= dashboardStats ? dashboardStats.currentUsage : 0 %>"><%= dashboardStats ? (dashboardStats.currentUsage / 1024 / 1024 / 1024).toFixed(2) : '0.00' %> GB</strong>
-                    <span id="statStorageDetail"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB tersinkron. Tersedia <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB.</span>
+                    <strong id="statStorageUsed" data-bytes="<%= dashboardStats ? dashboardStats.currentUsage : 0 %>"><%= formatStorageDisplay(dashboardStats ? dashboardStats.currentUsage : 0) %></strong>
+                    <span id="statStorageDetail"><%= formatStorageDisplay(used) %> / <%= formatStorageDisplay(totalLimit) %> tersinkron. Tersedia <%= formatStorageDisplay(available) %>.</span>
                 </article>
                 <article class="hero-stat-card">
                     <small>Total downloads</small>
@@ -733,10 +742,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('statOwnedFolders').textContent = dashboardState.stats.ownedFolders;
         document.getElementById('statSharedItems').textContent = dashboardState.stats.sharedItems;
         document.getElementById('statDownloads').textContent = dashboardState.stats.totalDownloads;
-        document.getElementById('statStorageUsed').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB`;
-        document.getElementById('statStorageDetail').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB tersinkron. Tersedia ${(available / 1024 / 1024 / 1024).toFixed(2)} GB.`;
-        document.getElementById('heroStorageUsage').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB`;
-        document.getElementById('heroStorageAvailable').textContent = `Sisa ${(available / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        document.getElementById('statStorageUsed').textContent = formatBytes(used);
+        document.getElementById('statStorageDetail').textContent = `${formatBytes(used)} / ${formatBytes(total)} tersinkron. Tersedia ${formatBytes(available)}.`;
+        document.getElementById('heroStorageUsage').textContent = `${formatBytes(used)} / ${formatBytes(total)}`;
+        document.getElementById('heroStorageAvailable').textContent = `Sisa ${formatBytes(available)}`;
         document.getElementById('heroStorageFill').style.width = `${percentage}%`;
 
         const storageFill = document.getElementById('storageFill');
@@ -745,13 +754,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (storageFill && storagePercent && storageMeta) {
             storageFill.style.width = `${percentage}%`;
             storagePercent.textContent = `${percentage.toFixed(1)}%`;
-            storageMeta.textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB`;
+            storageMeta.textContent = `${formatBytes(used)} / ${formatBytes(total)}`;
             storageMeta.dataset.storageUsed = String(used);
             storageMeta.dataset.storageTotal = String(total);
             storageMeta.dataset.storageAvailable = String(available);
             const storageAvailableLabel = document.getElementById('storageAvailableLabel');
             if (storageAvailableLabel) {
-                storageAvailableLabel.textContent = `Tersedia ${(available / 1024 / 1024 / 1024).toFixed(2)} GB`;
+                storageAvailableLabel.textContent = `Tersedia ${formatBytes(available)}`;
             }
         }
     }
