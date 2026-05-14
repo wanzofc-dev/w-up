@@ -13,7 +13,7 @@ const PaymentTransaction = require('../models/paymentTransaction');
 const { getUserStorageSnapshot } = require('../utils/storage');
 const auth = require('../middleware/auth');
 const { r2, GetObjectCommand, DeleteObjectCommand, getR2BucketName } = require('../utils/r2');
-const { getBillingPricing } = require('../utils/billing');
+const { getBillingPricing, getPlanCatalog, getPlanSummary } = require('../utils/billing');
 const { getMidtransConfig, getSnapScriptUrl, hasMidtransConfig } = require('../utils/midtrans');
 
 function getRequestOrigin(req) {
@@ -59,18 +59,29 @@ router.get('/logout', async (req, res) => {
     res.redirect('/login');
 });
 
-router.get('/profile', auth.protectView, (req, res) => {
-    let currentDeviceId = '';
-    const currentRefreshToken = req.cookies.refresh_token || '';
+router.get('/profile', auth.protectView, async (req, res) => {
+    try {
+        let currentDeviceId = '';
+        const currentRefreshToken = req.cookies.refresh_token || '';
 
-    if (currentRefreshToken) {
-        try {
-            const decoded = jwt.verify(currentRefreshToken, process.env.JWT_SECRET);
-            currentDeviceId = decoded.deviceId || '';
-        } catch (e) {}
+        if (currentRefreshToken) {
+            try {
+                const decoded = jwt.verify(currentRefreshToken, process.env.JWT_SECRET);
+                currentDeviceId = decoded.deviceId || '';
+            } catch (e) {}
+        }
+
+        const storageSnapshot = await getUserStorageSnapshot(req.user._id);
+
+        res.render('profile', {
+            currentDeviceId,
+            storageSnapshot,
+            currentPlanSummary: getPlanSummary(req.user.plan),
+            planCatalog: getPlanCatalog()
+        });
+    } catch (error) {
+        res.status(500).send('Error loading profile page.');
     }
-
-    res.render('profile', { currentDeviceId });
 });
 
 router.get('/docs', auth.checkAuthStatus, (req, res) => {
@@ -113,23 +124,92 @@ router.get('/u/:username', auth.checkAuthStatus, async (req, res) => {
     try {
         const targetUser = await User.findOne({ username: req.params.username, isPublicProfile: true });
         if (!targetUser) return res.status(404).render('404');
-        
-        const files = await File.find({ 
-            owner: targetUser._id, 
-            isHidden: false, 
-            deletedAt: null, 
-            isFolder: false 
-        }).sort({ createdAt: -1 }).select('-base64 -password');
+
+        let currentFolder = null;
+        if (req.query.folder) {
+            currentFolder = await File.findOne({
+                _id: req.query.folder,
+                owner: targetUser._id,
+                isFolder: true,
+                isHidden: false,
+                deletedAt: null
+            }).select('originalName parentId');
+            if (!currentFolder) return res.status(404).render('404');
+        }
+
+        const files = await File.find({
+            owner: targetUser._id,
+            isHidden: false,
+            deletedAt: null,
+            parentId: currentFolder ? currentFolder._id : null
+        }).sort({ isFolder: -1, createdAt: -1 }).select('-base64 -password');
+
+        const publicFiles = await File.find({
+            owner: targetUser._id,
+            isHidden: false,
+            deletedAt: null,
+            isFolder: false
+        }).select('downloads size');
+
+        const folderIds = files.filter((item) => item.isFolder).map((item) => item._id);
+        const folderChildCounts = folderIds.length
+            ? await File.aggregate([
+                {
+                    $match: {
+                        owner: targetUser._id,
+                        isHidden: false,
+                        deletedAt: null,
+                        parentId: { $in: folderIds }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$parentId',
+                        count: { $sum: 1 }
+                    }
+                }
+            ])
+            : [];
+
+        const folderCountMap = folderChildCounts.reduce((acc, item) => {
+            acc[String(item._id)] = item.count;
+            return acc;
+        }, {});
+
+        const breadcrumbs = [];
+        if (currentFolder) {
+            let walker = currentFolder;
+            while (walker) {
+                breadcrumbs.unshift({ id: walker._id, name: walker.originalName });
+                if (!walker.parentId) break;
+                walker = await File.findOne({
+                    _id: walker.parentId,
+                    owner: targetUser._id,
+                    isFolder: true,
+                    isHidden: false,
+                    deletedAt: null
+                }).select('originalName parentId');
+            }
+        }
 
         const publicStats = {
-            totalFiles: files.length,
-            totalDownloads: files.reduce((sum, item) => sum + (item.downloads || 0), 0),
-            totalSize: files.reduce((sum, item) => sum + (item.size || 0), 0)
+            totalFiles: publicFiles.length,
+            totalDownloads: publicFiles.reduce((sum, item) => sum + (item.downloads || 0), 0),
+            totalSize: publicFiles.reduce((sum, item) => sum + (item.size || 0), 0),
+            totalFolders: await File.countDocuments({
+                owner: targetUser._id,
+                isHidden: false,
+                deletedAt: null,
+                isFolder: true
+            })
         };
         
         res.render('public_profile', {
             targetUser,
             files,
+            currentFolder,
+            breadcrumbs,
+            folderCountMap,
             publicStats,
             publicDisplayTitle: targetUser.publicTitle || targetUser.branding?.pageTitle || `@${targetUser.username}`
         });
@@ -249,6 +329,7 @@ router.get('/billing', auth.protectView, async (req, res) => {
     try {
         const { monthlyPrice, yearlyPrice } = getBillingPricing();
         const currentPlan = req.user.plan || 'free';
+        const storageSnapshot = await getUserStorageSnapshot(req.user._id);
         const recentTransactions = await PaymentTransaction.find({ user: req.user.id })
             .sort({ createdAt: -1 })
             .limit(8)
@@ -260,6 +341,10 @@ router.get('/billing', auth.protectView, async (req, res) => {
             monthlyPrice,
             yearlyPrice,
             currentExpiry: req.user.subscriptionExpiresAt,
+            storageSnapshot,
+            currentPlanSummary: getPlanSummary(currentPlan),
+            targetPlanSummary: getPlanSummary('pro'),
+            planCatalog: getPlanCatalog(),
             recentTransactions,
             midtransEnabled: hasMidtransConfig(),
             midtransClientKey: midtransConfig.clientKey,

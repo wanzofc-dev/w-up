@@ -59,8 +59,12 @@
                             <div class="nav-account-meta">
                                 <strong><%= user.username %></strong>
                                 <small>
-                                    <%= user.plan === 'pro' ? 'PRO Member' : 'Free Plan' %>
-                                    <% if (user.isVerified) { %> | Verified <% } %>
+                                    <% if (user.plan === 'pro') { %>
+                                        <i class="fa-solid fa-crown"></i> PRO Member
+                                    <% } else { %>
+                                        <i class="fa-solid fa-seedling"></i> Free Plan
+                                    <% } %>
+                                    <% if (user.isVerified) { %> | <i class="fa-solid fa-circle-check"></i> Verified <% } %>
                                 </small>
                             </div>
                         </div>

@@ -274,7 +274,7 @@
         <li class="separator" id="cmToolsSeparator"></li>
         <li id="cmOCR"><i class="fa-solid fa-wand-magic-sparkles"></i> Extract Text (OCR)</li>
         <li id="cmConvert"><i class="fa-solid fa-right-left"></i> Convert</li>
-        <li id="cmExtract"><i class="fa-solid fa-box-open"></i> Extract Archive</li>
+        <li id="cmExtract"><i class="fa-solid fa-sparkles"></i> AI Extract</li>
         <li class="separator"></li>
         <li id="cmRename"><i class="fa-solid fa-pen"></i> Rename</li>
         <li id="cmMove"><i class="fa-solid fa-folder-tree"></i> Move</li>
@@ -296,6 +296,39 @@
 <div class="modal" id="moveModal"><div class="modal-box"><h3>Move Items</h3><input type="text" id="moveFolderInput" class="full-input" placeholder="Destination folder ID, leave empty for root"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmMoveBtn">Move</button></div></div></div>
 <div class="modal" id="transferOwnershipModal"><div class="modal-box"><h3>Transfer Ownership</h3><input type="text" id="transferOwnerInput" class="full-input" placeholder="Username of the new owner"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmTransferOwnershipBtn">Transfer</button></div></div></div>
 <div class="modal" id="convertModal"><div class="modal-box"><h3>Convert Image</h3><select id="convertFormatInput" class="full-input"><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WEBP</option></select><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmConvertBtn">Convert</button></div></div></div>
+<div class="modal" id="extractProgressModal">
+    <div class="modal-box upload-progress-box extract-progress-box">
+        <div class="upload-progress-head">
+            <div>
+                <span class="upload-progress-badge">AI Archive Workflow</span>
+                <h3>AI Extract sedang berjalan</h3>
+                <p id="extractSummary">Arsip sedang dipetakan sebelum file hasil extract dimasukkan ke folder yang sama.</p>
+            </div>
+            <button class="icon-btn cancel-btn" type="button" aria-label="Close extract progress">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+        <div class="upload-progress-overall">
+            <div class="upload-progress-rail">
+                <div class="upload-progress-fill" id="extractOverallFill"></div>
+            </div>
+            <div class="upload-progress-meta">
+                <strong id="extractOverallLabel">0%</strong>
+                <span id="extractStageLabel">Menunggu proses AI extract...</span>
+            </div>
+        </div>
+        <div class="extract-stage-list" id="extractStageList"></div>
+        <div class="extract-result-card" id="extractResultCard" style="display:none;">
+            <strong>Hasil extract</strong>
+            <p id="extractResultMeta"></p>
+            <ul id="extractResultNames"></ul>
+            <div class="modal-footer" style="padding-top:0;">
+                <button class="btn secondary-btn cancel-btn" type="button">Close</button>
+                <a class="btn primary-btn" id="extractOpenFolderBtn" href="/dashboard">Open folder</a>
+            </div>
+        </div>
+    </div>
+</div>
 <div class="modal" id="uploadProgressModal">
     <div class="modal-box upload-progress-box">
         <div class="upload-progress-head">
@@ -542,6 +575,69 @@
         overflow-y: auto;
         padding-right: 0.15rem;
     }
+    .extract-progress-box {
+        max-width: 640px;
+    }
+    .extract-stage-list {
+        display: grid;
+        gap: 0.8rem;
+        margin-top: 1.1rem;
+    }
+    .extract-stage-item {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr);
+        gap: 0.8rem;
+        align-items: start;
+        padding: 1rem;
+        border-radius: 18px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+    }
+    .extract-stage-item i {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--primary);
+        background: rgba(14,165,233,0.12);
+    }
+    .extract-stage-item strong {
+        display: block;
+        margin-bottom: 0.16rem;
+    }
+    .extract-stage-item span {
+        display: block;
+        color: var(--muted-text);
+        font-size: 0.92rem;
+        line-height: 1.55;
+    }
+    .extract-stage-item.active {
+        border-color: rgba(14,165,233,0.35);
+        box-shadow: 0 0 0 1px rgba(14,165,233,0.08);
+    }
+    .extract-stage-item.complete i {
+        color: #16a34a;
+        background: rgba(34,197,94,0.14);
+    }
+    .extract-result-card {
+        margin-top: 1rem;
+        padding: 1rem;
+        border-radius: 20px;
+        background: linear-gradient(180deg, rgba(14,165,233,0.06), transparent);
+        border: 1px solid var(--border);
+    }
+    .extract-result-card p {
+        margin: 0.55rem 0 0.85rem;
+        color: var(--muted-text);
+    }
+    .extract-result-card ul {
+        margin: 0 0 1rem;
+        padding-left: 1.1rem;
+        display: grid;
+        gap: 0.42rem;
+    }
     .upload-row {
         padding: 1rem;
         border-radius: 20px;
@@ -625,6 +721,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const uploadOverallCount = document.getElementById('uploadOverallCount');
     const uploadModalSummary = document.getElementById('uploadModalSummary');
     const closeUploadProgressBtn = document.getElementById('closeUploadProgressBtn');
+    const extractProgressModal = document.getElementById('extractProgressModal');
+    const extractOverallFill = document.getElementById('extractOverallFill');
+    const extractOverallLabel = document.getElementById('extractOverallLabel');
+    const extractStageLabel = document.getElementById('extractStageLabel');
+    const extractStageList = document.getElementById('extractStageList');
+    const extractSummary = document.getElementById('extractSummary');
+    const extractResultCard = document.getElementById('extractResultCard');
+    const extractResultMeta = document.getElementById('extractResultMeta');
+    const extractResultNames = document.getElementById('extractResultNames');
+    const extractOpenFolderBtn = document.getElementById('extractOpenFolderBtn');
     const dashboardState = {
         stats: {
             ownedFiles: <%- JSON.stringify(dashboardStats ? dashboardStats.ownedFiles : files.filter(file => !file.isFolder).length) %>,
@@ -823,6 +929,129 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadOverallFill.style.width = `${percent}%`;
         uploadOverallLabel.textContent = `${Math.round(percent)}%`;
         uploadOverallCount.textContent = `${completed} / ${totalFiles} selesai`;
+    }
+
+    const extractStages = [
+        {
+            key: 'inspect',
+            icon: 'fa-solid fa-magnifying-glass-chart',
+            title: 'Inspect archive',
+            note: 'AI membaca struktur ZIP dan menghitung jalur file yang akan dipindahkan.'
+        },
+        {
+            key: 'extract',
+            icon: 'fa-solid fa-box-open',
+            title: 'Extract contents',
+            note: 'Isi arsip dikeluarkan langsung ke folder yang sama dengan file sumber.'
+        },
+        {
+            key: 'security',
+            icon: 'fa-solid fa-shield-halved',
+            title: 'Rescan extracted files',
+            note: 'Setiap file hasil extract ditandai ulang untuk pemeriksaan keamanan berikutnya.'
+        },
+        {
+            key: 'insight',
+            icon: 'fa-solid fa-sparkles',
+            title: 'Write AI insight',
+            note: 'AI menyimpan ringkasan isi extract agar widget assistant punya konteks baru.'
+        }
+    ];
+
+    let extractProgressTimer = null;
+
+    function renderExtractStages(activeIndex = 0) {
+        if (!extractStageList) return;
+        extractStageList.innerHTML = extractStages.map((stage, index) => {
+            const stateClass = index < activeIndex ? 'complete' : index === activeIndex ? 'active' : '';
+            return `
+                <div class="extract-stage-item ${stateClass}">
+                    <i class="${stage.icon}"></i>
+                    <div>
+                        <strong>${stage.title}</strong>
+                        <span>${stage.note}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function openExtractProgress(fileName) {
+        if (!extractProgressModal) return;
+        extractProgressModal.classList.add('active');
+        extractResultCard.style.display = 'none';
+        extractResultNames.innerHTML = '';
+        extractSummary.textContent = `${fileName} sedang diproses dengan workflow AI extract agar hasilnya tetap rapi di folder yang sama.`;
+        extractOverallFill.style.width = '6%';
+        extractOverallLabel.textContent = '6%';
+        extractStageLabel.textContent = extractStages[0].title;
+        renderExtractStages(0);
+    }
+
+    function closeExtractProgress(force = false) {
+        if (!force && extractProgressTimer) return;
+        extractProgressModal?.classList.remove('active');
+    }
+
+    function animateExtractProgress() {
+        let percent = 6;
+        let stageIndex = 0;
+        clearInterval(extractProgressTimer);
+        extractProgressTimer = setInterval(() => {
+            percent = Math.min(90, percent + (stageIndex < 2 ? 9 : 5));
+            if (percent >= 28 && stageIndex < 1) stageIndex = 1;
+            if (percent >= 56 && stageIndex < 2) stageIndex = 2;
+            if (percent >= 78 && stageIndex < 3) stageIndex = 3;
+            extractOverallFill.style.width = `${percent}%`;
+            extractOverallLabel.textContent = `${Math.round(percent)}%`;
+            extractStageLabel.textContent = extractStages[stageIndex].title;
+            renderExtractStages(stageIndex);
+            if (percent >= 90) {
+                clearInterval(extractProgressTimer);
+                extractProgressTimer = null;
+            }
+        }, 460);
+    }
+
+    async function runArchiveExtract(fileId, fileName) {
+        openExtractProgress(fileName);
+        animateExtractProgress();
+
+        try {
+            const res = await fetch(`/api/files/${fileId}/extract`, { method: 'POST' });
+            const data = await res.json();
+
+            clearInterval(extractProgressTimer);
+            extractProgressTimer = null;
+
+            if (!res.ok) {
+                extractOverallFill.style.width = '100%';
+                extractOverallLabel.textContent = 'Failed';
+                extractStageLabel.textContent = data.message || 'AI extract gagal.';
+                extractSummary.textContent = data.message || 'AI extract gagal diproses.';
+                renderExtractStages(0);
+                showToast(data.message || 'AI extract failed.', 'error');
+                return;
+            }
+
+            extractOverallFill.style.width = '100%';
+            extractOverallLabel.textContent = '100%';
+            extractStageLabel.textContent = 'Selesai';
+            renderExtractStages(extractStages.length);
+            extractResultMeta.textContent = `${data.extractedCount || 0} file berhasil diextract. Hasil sudah masuk ke folder yang sama dengan arsip sumber.`;
+            extractResultNames.innerHTML = (data.extractedNames || []).map((name) => `<li>${escapeHtml(name)}</li>`).join('');
+            extractOpenFolderBtn.href = data.destinationFolderId ? `/dashboard?folderId=${encodeURIComponent(data.destinationFolderId)}` : '/dashboard';
+            extractResultCard.style.display = 'block';
+            extractSummary.textContent = data.message || 'AI extract selesai.';
+            showToast(data.message || 'AI extract selesai.', 'success');
+        } catch (error) {
+            clearInterval(extractProgressTimer);
+            extractProgressTimer = null;
+            extractOverallLabel.textContent = 'Failed';
+            extractStageLabel.textContent = 'Server error';
+            extractSummary.textContent = 'Server gagal menyelesaikan AI extract. Coba lagi.';
+            showToast('AI extract failed.', 'error');
+        }
     }
 
     function appendUploadedFile(file) {
@@ -1172,6 +1401,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 closeUploadProgressModal();
                 return;
             }
+            if (modal.id === 'extractProgressModal') {
+                closeExtractProgress(true);
+                return;
+            }
             modal.classList.remove('active');
         });
     }
@@ -1180,6 +1413,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.target !== modal) return;
             if (modal.id === 'uploadProgressModal') {
                 closeUploadProgressModal();
+                return;
+            }
+            if (modal.id === 'extractProgressModal') {
+                closeExtractProgress(true);
                 return;
             }
             modal.classList.remove('active');
@@ -1383,12 +1620,12 @@ document.addEventListener('DOMContentLoaded', () => {
         updateVisibilityUi();
         
         const collabList = document.getElementById('collaboratorsList');
-        collabList.innerHTML = data.collaborators.map(c => `<div class="list-item"><span>${c.user.username} (${c.role})</span><button class="icon-btn danger" onclick="removeCollab('${c.user.username}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+        collabList.innerHTML = data.collaborators.map(c => `<div class="list-item"><span>${c.user.username} (${c.role})</span><button class="icon-btn danger remove-collab-btn" data-username="${escapeHtml(c.user.username)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
 
         const linksList = document.getElementById('shareLinksList');
         linksList.innerHTML = data.shareLinks.map(l => {
             const fullLink = getPrivateShareLink(l.linkId);
-            return `<div class="list-item"><code>${fullLink}</code><div><button class="icon-btn" onclick="navigator.clipboard.writeText('${fullLink}'); showToast('Copied!')"><i class="fa-solid fa-copy"></i></button><button class="icon-btn danger" onclick="revokeLink('${l.linkId}')"><i class="fa-solid fa-trash"></i></button></div></div>`;
+            return `<div class="list-item"><code>${fullLink}</code><div><button class="icon-btn copy-private-link-btn" data-link="${escapeHtml(fullLink)}"><i class="fa-solid fa-copy"></i></button><button class="icon-btn danger revoke-link-btn" data-link-id="${escapeHtml(l.linkId)}"><i class="fa-solid fa-trash"></i></button></div></div>`;
         }).join('') || '<p class="text-muted">No private links created yet.</p>';
         
         await loadAnalytics();
@@ -1427,6 +1664,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    document.getElementById('shareModal')?.addEventListener('click', (event) => {
+        const removeCollabBtn = event.target.closest('.remove-collab-btn');
+        if (removeCollabBtn) {
+            removeCollab(removeCollabBtn.dataset.username);
+            return;
+        }
+
+        const copyPrivateLinkBtn = event.target.closest('.copy-private-link-btn');
+        if (copyPrivateLinkBtn) {
+            navigator.clipboard.writeText(copyPrivateLinkBtn.dataset.link || '');
+            showToast('Copied!', 'success');
+            return;
+        }
+
+        const revokeLinkBtn = event.target.closest('.revoke-link-btn');
+        if (revokeLinkBtn) {
+            revokeLink(revokeLinkBtn.dataset.linkId);
+        }
+    });
+
     document.getElementById('cmOCR').addEventListener('click', async () => {
         if (!contextTarget) return;
         showToast('Starting OCR...', 'info');
@@ -1437,8 +1694,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     document.getElementById('cmExtract').addEventListener('click', async () => {
         if (!contextTarget) return;
-        showToast('Extracting archive...', 'info');
-        if (await performAction(`/api/files/${contextTarget.dataset.id}/extract`, 'POST')) setTimeout(() => location.reload(), 1000);
+        contextMenu.style.display = 'none';
+        await runArchiveExtract(contextTarget.dataset.id, contextTarget.dataset.name || 'archive');
     });
 
     document.getElementById('cmConvert').addEventListener('click', async () => {

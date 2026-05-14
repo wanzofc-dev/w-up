@@ -1,4 +1,14 @@
 <%- include('partials/header', { title: 'Payment', pageCss: 'dashboard' }) %>
+<%
+    const billingStorage = storageSnapshot || { used: 0, total: 0, available: 0, percentage: 0, fileCount: 0 };
+    const formatStorageUnit = (value = 0) => {
+        const numeric = Number(value || 0);
+        if (numeric >= 1024 * 1024 * 1024) return `${(numeric / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
+        if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
+        return `${numeric.toFixed(0)} B`;
+    };
+%>
 
 <div class="dashboard-layout">
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -21,13 +31,21 @@
                     <h2>Upgrade PRO dengan Midtrans dari halaman payment yang lebih rapi dan fokus.</h2>
                     <p>Halaman ini sekarang tidak lagi demo. Checkout PRO dibuat sebagai transaksi permanen, statusnya tersimpan, dan histori pembayarannya tampil di akun Anda.</p>
                     <div class="hero-metrics">
-                        <div class="hero-metric">
+                        <div class="hero-metric" id="billingPlanMetric">
                             <small>Plan saat ini</small>
-                            <strong><%= currentPlan.toUpperCase() %></strong>
+                            <strong id="billingCurrentPlanLabel"><%= currentPlanSummary.name.toUpperCase() %></strong>
                         </div>
                         <div class="hero-metric">
                             <small>Berakhir</small>
-                            <strong><%= currentExpiry ? new Date(currentExpiry).toLocaleDateString('id-ID') : 'Belum aktif' %></strong>
+                            <strong id="billingExpiryLabel"><%= currentExpiry ? new Date(currentExpiry).toLocaleDateString('id-ID') : 'Belum aktif' %></strong>
+                        </div>
+                        <div class="hero-metric">
+                            <small>Storage terpakai</small>
+                            <strong id="billingStorageUsageLabel"><%= formatStorageUnit(billingStorage.used) %> / <%= formatStorageUnit(billingStorage.total) %></strong>
+                        </div>
+                        <div class="hero-metric">
+                            <small>Sisa storage</small>
+                            <strong id="billingStorageAvailableLabel"><%= formatStorageUnit(billingStorage.available) %></strong>
                         </div>
                     </div>
                 </div>
@@ -37,7 +55,7 @@
                         <strong class="<%= midtransEnabled ? 'ok' : 'warn' %>"><%= midtransEnabled ? 'Midtrans Ready' : 'Belum dikonfigurasi' %></strong>
                     </div>
                     <div class="hero-card-price">Rp <%= monthlyPrice.toLocaleString('id-ID') %><small>/bulan</small></div>
-                    <p>Storage 50 GB, branding PRO, public page yang lebih premium, dan akses workflow yang lebih lengkap.</p>
+                    <p id="billingTargetSummary">Target upgrade: <strong><%= targetPlanSummary.name %></strong> dengan <strong><%= formatStorageUnit(targetPlanSummary.storageLimit) %></strong> total storage, branding premium, dan workflow yang lebih lengkap.</p>
                 </div>
             </section>
 
@@ -111,8 +129,20 @@
                                 <strong id="summaryMethod">QRIS</strong>
                             </div>
                             <div class="summary-row">
+                                <span>Plan aktif</span>
+                                <strong id="summaryCurrentPlan"><%= currentPlanSummary.name %></strong>
+                            </div>
+                            <div class="summary-row">
                                 <span>Upgrade target</span>
-                                <strong>PRO 50 GB</strong>
+                                <strong id="summaryTargetPlan"><%= targetPlanSummary.name %> <%= formatStorageUnit(targetPlanSummary.storageLimit) %></strong>
+                            </div>
+                            <div class="summary-row">
+                                <span>Storage saat ini</span>
+                                <strong id="summaryStorageUsage"><%= formatStorageUnit(billingStorage.used) %> / <%= formatStorageUnit(billingStorage.total) %></strong>
+                            </div>
+                            <div class="summary-row">
+                                <span>Storage tersedia</span>
+                                <strong id="summaryStorageAvailable"><%= formatStorageUnit(billingStorage.available) %></strong>
                             </div>
                             <div class="summary-row total">
                                 <span>Total</span>
@@ -131,7 +161,7 @@
                         <% } %>
 
                         <div class="summary-note">
-                            Transaksi yang berhasil akan otomatis memperpanjang masa aktif PRO Anda dan masuk ke riwayat pembayaran.
+                            <span id="billingSummaryNote">Transaksi yang berhasil akan otomatis memperpanjang masa aktif PRO Anda, menaikkan limit storage, dan masuk ke riwayat pembayaran.</span>
                         </div>
                     </section>
                 </div>
@@ -146,7 +176,7 @@
                         </div>
                     </div>
 
-                    <div class="history-list">
+                    <div class="history-list" id="billingHistoryList">
                         <% if (!recentTransactions || recentTransactions.length === 0) { %>
                             <div class="empty-state billing-empty">
                                 <i class="fa-solid fa-receipt"></i>
@@ -387,11 +417,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryPlan = document.getElementById('summaryPlan');
     const summaryMethod = document.getElementById('summaryMethod');
     const summaryTotal = document.getElementById('summaryTotal');
+    const summaryCurrentPlan = document.getElementById('summaryCurrentPlan');
+    const summaryTargetPlan = document.getElementById('summaryTargetPlan');
+    const summaryStorageUsage = document.getElementById('summaryStorageUsage');
+    const summaryStorageAvailable = document.getElementById('summaryStorageAvailable');
+    const billingCurrentPlanLabel = document.getElementById('billingCurrentPlanLabel');
+    const billingExpiryLabel = document.getElementById('billingExpiryLabel');
+    const billingStorageUsageLabel = document.getElementById('billingStorageUsageLabel');
+    const billingStorageAvailableLabel = document.getElementById('billingStorageAvailableLabel');
+    const billingSummaryNote = document.getElementById('billingSummaryNote');
+    const billingHistoryList = document.getElementById('billingHistoryList');
     const payNowBtn = document.getElementById('payNowBtn');
 
     let selectedCycle = 'monthly';
     let selectedMethod = 'qris';
     let selectedPrice = Number(document.querySelector('.plan-card.active')?.dataset.price || 0);
+    let currentPlan = <%- JSON.stringify(currentPlanSummary.name) %>;
 
     function toggleSidebar() {
         if (sidebar) sidebar.classList.toggle('active');
@@ -406,10 +447,100 @@ document.addEventListener('DOMContentLoaded', () => {
         return `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
     }
 
+    function formatBytes(value) {
+        const numeric = Number(value || 0);
+        if (numeric >= 1024 * 1024 * 1024) return `${(numeric / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
+        if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
+        return `${numeric.toFixed(0)} B`;
+    }
+
+    function formatDate(value) {
+        if (!value) return 'Belum aktif';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return 'Belum aktif';
+        return parsed.toLocaleDateString('id-ID');
+    }
+
     function refreshSummary() {
         summaryPlan.textContent = selectedCycle === 'yearly' ? 'Yearly PRO' : 'Monthly PRO';
         summaryMethod.textContent = selectedMethod.replace('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
         summaryTotal.textContent = formatPrice(selectedPrice);
+        if (summaryCurrentPlan) summaryCurrentPlan.textContent = currentPlan;
+        if (summaryTargetPlan) summaryTargetPlan.textContent = `Pro ${formatBytes(<%- JSON.stringify(targetPlanSummary.storageLimit) %>)}`;
+    }
+
+    function renderHistoryItem(item) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'history-item';
+        wrapper.innerHTML = `
+            <div>
+                <strong>${item.billingCycle === 'yearly' ? 'Yearly PRO' : 'Monthly PRO'}</strong>
+                <small>${item.orderId}</small>
+            </div>
+            <div class="history-mid">
+                <span>${formatPrice(item.amount || 0)}</span>
+                <small>${new Date(item.createdAt).toLocaleString('id-ID')}</small>
+            </div>
+            <div class="history-status ${item.status}">
+                ${item.status}
+            </div>
+        `;
+        return wrapper;
+    }
+
+    async function loadBillingHistory() {
+        if (!billingHistoryList) return;
+        try {
+            const response = await fetch('/api/billing/history');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to load history.');
+
+            billingHistoryList.innerHTML = '';
+            if (!Array.isArray(data.transactions) || data.transactions.length === 0) {
+                billingHistoryList.innerHTML = `
+                    <div class="empty-state billing-empty">
+                        <i class="fa-solid fa-receipt"></i>
+                        <p>Belum ada transaksi tersimpan.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            data.transactions.forEach((item) => billingHistoryList.appendChild(renderHistoryItem(item)));
+        } catch (error) {}
+    }
+
+    function updateBillingState(syncData) {
+        if (!syncData) return;
+        if (syncData.planSummary?.name) {
+            currentPlan = syncData.planSummary.name;
+        } else if (syncData.plan) {
+            currentPlan = String(syncData.plan).toUpperCase();
+        }
+
+        if (billingCurrentPlanLabel) billingCurrentPlanLabel.textContent = currentPlan.toUpperCase();
+        if (billingExpiryLabel) billingExpiryLabel.textContent = formatDate(syncData.expiresAt);
+        if (summaryCurrentPlan) summaryCurrentPlan.textContent = currentPlan;
+
+        if (syncData.storage) {
+            if (billingStorageUsageLabel) {
+                billingStorageUsageLabel.textContent = `${formatBytes(syncData.storage.used)} / ${formatBytes(syncData.storage.total)}`;
+            }
+            if (billingStorageAvailableLabel) {
+                billingStorageAvailableLabel.textContent = formatBytes(syncData.storage.available);
+            }
+            if (summaryStorageUsage) {
+                summaryStorageUsage.textContent = `${formatBytes(syncData.storage.used)} / ${formatBytes(syncData.storage.total)}`;
+            }
+            if (summaryStorageAvailable) {
+                summaryStorageAvailable.textContent = formatBytes(syncData.storage.available);
+            }
+        }
+
+        if (billingSummaryNote && syncData.status === 'paid') {
+            billingSummaryNote.textContent = 'Pembayaran sukses. Plan dan limit storage sudah di-upgrade, dan webhook billing juga sudah dipicu.';
+        }
     }
 
     tabs.forEach(tab => {
@@ -475,12 +606,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.snap.pay(data.token, {
                     onSuccess: async () => {
                         showToast('Pembayaran berhasil. Menyinkronkan akun...', 'success');
-                        await syncPayment(data.orderId);
-                        setTimeout(() => window.location.reload(), 1200);
+                        const syncData = await syncPayment(data.orderId);
+                        updateBillingState(syncData);
+                        await loadBillingHistory();
                     },
                     onPending: async () => {
                         showToast('Pembayaran dibuat. Selesaikan dulu di Midtrans.', 'info');
-                        await syncPayment(data.orderId);
+                        const syncData = await syncPayment(data.orderId);
+                        updateBillingState(syncData);
+                        await loadBillingHistory();
                     },
                     onError: () => {
                         showToast('Pembayaran gagal diproses.', 'error');
@@ -499,6 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     refreshSummary();
+    loadBillingHistory();
 });
 </script>
 

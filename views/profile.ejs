@@ -19,20 +19,33 @@
         <div class="profile-container">
             <section class="profile-hero">
                 <div class="profile-hero-copy">
-                    <span class="profile-hero-badge">Workspace Identity</span>
-                    <div class="quote-bubbles">
-                        <div class="quote-bubble incoming">
-                            <span class="quote-author">@<%= user.username %></span>
-                            <p>Profil sekarang lebih rapi, lebih gampang dibagikan, dan kontrol akun dikumpulkan di satu tempat.</p>
+                    <div class="profile-hero-topline">
+                        <span class="profile-hero-badge">Workspace Identity</span>
+                        <span class="plan-chip <%= user.plan === 'pro' ? 'pro' : 'free' %>">
+                            <i class="fa-solid <%= user.plan === 'pro' ? 'fa-crown' : 'fa-seedling' %>"></i>
+                            <%= user.plan === 'pro' ? 'Pro Plan' : 'Free Plan' %>
+                        </span>
+                    </div>
+                    <h2>Kelola identitas, keamanan, billing, dan akses akun Anda dari satu panel yang lebih tajam.</h2>
+                    <p>Semua pengaturan penting sekarang dikumpulkan dalam layout yang lebih rapi untuk desktop maupun device mobile, termasuk public profile, API key, passkey, referral, dan device session.</p>
+                    <div class="profile-pulse-grid">
+                        <div class="profile-pulse-card">
+                            <small>Username</small>
+                            <strong>@<%= user.username %></strong>
                         </div>
-                        <div class="quote-bubble outgoing">
-                            <p>Referral, keamanan, branding, dan billing sekarang terasa seperti panel chat status yang lebih hidup.</p>
+                        <div class="profile-pulse-card">
+                            <small>Role</small>
+                            <strong><i class="fa-solid <%= user.role === 'admin' ? 'fa-shield-halved' : 'fa-user' %>"></i> <%= user.role %></strong>
+                        </div>
+                        <div class="profile-pulse-card">
+                            <small>Status</small>
+                            <strong><i class="fa-solid <%= user.isVerified ? 'fa-circle-check' : 'fa-clock' %>"></i> <%= user.isVerified ? 'Verified' : 'Pending' %></strong>
                         </div>
                     </div>
                     <div class="profile-hero-stats">
                         <div class="hero-stat">
                             <small>Plan</small>
-                            <strong><%= user.plan.toUpperCase() %></strong>
+                            <strong><i class="fa-solid <%= user.plan === 'pro' ? 'fa-crown' : 'fa-seedling' %>"></i> <%= user.plan.toUpperCase() %></strong>
                         </div>
                         <div class="hero-stat">
                             <small>Referral</small>
@@ -57,9 +70,14 @@
                             <span><%= user.isPublicProfile ? (user.publicTitle || `/u/${user.username}`) : 'Aktifkan public profile untuk membagikan halaman Anda.' %></span>
                         </div>
                     </div>
-                    <a href="/billing" class="btn primary-btn" style="width:100%; justify-content:center;">
-                        <i class="fa-solid fa-credit-card"></i> Billing & Payment
-                    </a>
+                    <div class="hero-panel-stack">
+                        <a href="/billing" class="btn primary-btn" style="width:100%; justify-content:center;">
+                            <i class="fa-solid fa-credit-card"></i> Billing & Payment
+                        </a>
+                        <a href="/u/<%= user.username %>" target="_blank" class="btn secondary-btn" style="width:100%; justify-content:center;">
+                            <i class="fa-solid fa-up-right-from-square"></i> Open Public Page
+                        </a>
+                    </div>
                 </div>
             </section>
 
@@ -190,7 +208,7 @@
                                             </div>
                                         </div>
                                         <div class="item-actions">
-                                            <button class="icon-btn danger" onclick="revokeApiKey('<%= apiKey._id %>')">
+                                            <button class="icon-btn danger revoke-api-key-btn" data-key-id="<%= apiKey._id %>">
                                                 <i class="fa-solid fa-trash"></i>
                                             </button>
                                         </div>
@@ -212,7 +230,7 @@
                             <p>Bagikan landing page referral Anda untuk mengarahkan orang ke halaman khusus dengan username dan banner Anda.</p>
                             <div class="code-display">
                                 <code id="refCode"><%= user.referralCode %></code>
-                                <button class="icon-btn" onclick="copyText('refCode')"><i class="fa-solid fa-copy"></i></button>
+                                <button class="icon-btn copy-ref-btn" type="button"><i class="fa-solid fa-copy"></i></button>
                             </div>
                         </div>
                         <div class="referral-actions-grid">
@@ -228,21 +246,29 @@
                         </div>
                         
                         <div class="stats-row" style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border);">
-                            <% 
-                                const totalLimit = user.storageLimit + (user.storageBonus || 0);
-                                const used = user.storageUsed || 0;
-                                const percentage = totalLimit > 0 ? Math.min(100, (used / totalLimit) * 100) : 0;
-                                const isFull = percentage >= 90;
+                            <%
+                                const liveStorage = storageSnapshot || { used: 0, total: 0, available: 0, percentage: 0, fileCount: 0 };
+                                const formatStorageUnit = (value = 0) => {
+                                    const numeric = Number(value || 0);
+                                    if (numeric >= 1024 * 1024 * 1024) return `${(numeric / 1024 / 1024 / 1024).toFixed(2)} GB`;
+                                    if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
+                                    if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
+                                    return `${numeric.toFixed(0)} B`;
+                                };
+                                const storageIsHigh = Number(liveStorage.percentage || 0) >= 90;
                             %>
                             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem; font-size: 0.9rem;">
                                 <span class="stat-label">Storage Usage (<%= user.plan.toUpperCase() %>)</span>
-                                <span class="stat-value" style="font-weight:bold; <%= isFull ? 'color:#ef4444;' : '' %>">
-                                    <%= (used / 1024 / 1024).toFixed(2) %> MB / 
-                                    <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB
+                                <span id="profileStorageUsageValue" class="stat-value" style="font-weight:bold; <%= storageIsHigh ? 'color:#ef4444;' : '' %>">
+                                    <%= formatStorageUnit(liveStorage.used) %> / <%= formatStorageUnit(liveStorage.total) %>
                                 </span>
                             </div>
                             <div class="progress-bar" style="height:12px; background:var(--bg-secondary); border-radius:6px; overflow:hidden; border:1px solid var(--border);">
-                                <div class="fill" style="width:<%= percentage %>%; background:<%= isFull ? '#ef4444' : 'var(--primary)' %>; height:100%; transition: width 0.5s ease;"></div>
+                                <div id="profileStorageBar" class="fill" style="width:<%= Number(liveStorage.percentage || 0) %>%; background:<%= storageIsHigh ? '#ef4444' : 'var(--primary)' %>; height:100%; transition: width 0.5s ease;"></div>
+                            </div>
+                            <div style="display:grid; gap:0.35rem; margin-top:0.85rem; color:var(--muted-text); font-size:0.9rem;">
+                                <span id="profileStorageAvailableText">Tersedia <strong><%= formatStorageUnit(liveStorage.available) %></strong> dari limit plan aktif.</span>
+                                <span id="profileStorageMetaText"><strong><%= Number(liveStorage.fileCount || 0) %></strong> file aktif menggunakan <strong><%= Number(liveStorage.percentage || 0).toFixed(1) %>%</strong> storage.</span>
                             </div>
                             
                             <% if(user.plan === 'free') { %>
@@ -300,7 +326,7 @@
                                         <div class="item-info">
                                             <span><i class="fa-solid fa-fingerprint"></i> Registered Device</span>
                                         </div>
-                                        <button onclick="removePasskey('<%= key.credentialID.toString('base64url') %>')" class="btn danger-btn-sm"><i class="fa-solid fa-trash"></i></button>
+                                        <button type="button" class="btn danger-btn-sm remove-passkey-btn" data-passkey-id="<%= key.credentialID.toString('base64url') %>"><i class="fa-solid fa-trash"></i></button>
                                     </div>
                                 <% }) %>
                             <% } else { %>
@@ -358,7 +384,7 @@
                                             <%= session.ip %> &bull; <%= session.location || 'Unknown' %> &bull; <%= new Date(session.lastActive).toLocaleDateString() %>
                                         </div>
                                     </div>
-                                    <button class="icon-btn danger" onclick="revokeSession('<%= session.deviceId %>')"><i class="fa-solid fa-trash"></i></button>
+                                    <button class="icon-btn danger revoke-session-btn" type="button" data-device-id="<%= session.deviceId %>"><i class="fa-solid fa-trash"></i></button>
                                 </li>
                             <% }) %>
                         </ul>
@@ -395,33 +421,55 @@
         letter-spacing: 0.05em;
         text-transform: uppercase;
     }
+    .profile-hero-topline {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        align-items: center;
+    }
+    .plan-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.42rem 0.82rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        border: 1px solid rgba(255,255,255,0.14);
+    }
+    .plan-chip.pro {
+        background: rgba(249,115,22,0.2);
+        color: #fff5e8;
+    }
+    .plan-chip.free {
+        background: rgba(255,255,255,0.12);
+        color: #fff;
+    }
     .profile-hero h2 { margin: 0.85rem 0 0.75rem; font-size: clamp(1.8rem, 3vw, 2.5rem); line-height: 1.14; }
     .profile-hero p { margin: 0; color: rgba(255,255,255,0.76); line-height: 1.72; }
-    .quote-bubbles { display: grid; gap: 0.85rem; margin-top: 1rem; max-width: 760px; }
-    .quote-bubble {
-        position: relative;
+    .profile-pulse-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin-top: 1rem;
+    }
+    .profile-pulse-card {
         padding: 0.95rem 1rem;
         border-radius: 20px;
-        max-width: 560px;
-        background: rgba(255,255,255,0.12);
-        border: 1px solid rgba(255,255,255,0.16);
-        box-shadow: 0 14px 30px rgba(15,23,42,0.10);
+        background: rgba(255,255,255,0.10);
+        border: 1px solid rgba(255,255,255,0.14);
     }
-    .quote-bubble p { margin: 0.15rem 0 0; color: #fff; }
-    .quote-bubble.incoming { border-bottom-left-radius: 8px; }
-    .quote-bubble.outgoing {
-        justify-self: end;
-        background: rgba(249,115,22,0.20);
-        border-bottom-right-radius: 8px;
+    .profile-pulse-card small {
+        display: block;
+        color: rgba(255,255,255,0.7);
+        margin-bottom: 0.25rem;
     }
-    .quote-author {
-        display: inline-block;
-        font-size: 0.76rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: rgba(255,255,255,0.72);
-        margin-bottom: 0.2rem;
+    .profile-pulse-card strong {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 1rem;
     }
     .profile-hero-stats {
         display: flex;
@@ -473,6 +521,11 @@
     .profile-hero-panel small { color: rgba(255,255,255,0.7); }
     .profile-hero-panel strong { font-size: 1.6rem; }
     .profile-hero-panel span { color: rgba(255,255,255,0.72); line-height: 1.6; }
+    .hero-panel-stack {
+        display: grid;
+        gap: 0.7rem;
+        margin-top: 0.2rem;
+    }
     .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 1.5rem; }
     .settings-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 1rem; }
     .card-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary); }
@@ -541,7 +594,10 @@
         color: var(--muted-text);
         padding: 1.5rem;
     }
-    @media (max-width: 900px) { .profile-hero { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) {
+        .profile-hero { grid-template-columns: 1fr; }
+        .profile-pulse-grid { grid-template-columns: 1fr; }
+    }
     @media (max-width: 768px) {
         .settings-grid { grid-template-columns: 1fr; }
         .referral-actions-grid { grid-template-columns: 1fr; }
@@ -565,6 +621,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if(sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
     if(closeSidebarBtn) closeSidebarBtn.addEventListener('click', toggleSidebar);
     if(sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
+
+    function formatBytes(value) {
+        const numeric = Number(value || 0);
+        if (numeric >= 1024 * 1024 * 1024) return `${(numeric / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
+        if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
+        return `${numeric.toFixed(0)} B`;
+    }
+
+    async function refreshProfileStorage() {
+        const usageNode = document.getElementById('profileStorageUsageValue');
+        const barNode = document.getElementById('profileStorageBar');
+        const availableNode = document.getElementById('profileStorageAvailableText');
+        const metaNode = document.getElementById('profileStorageMetaText');
+        if (!usageNode || !barNode || !availableNode || !metaNode) return;
+
+        try {
+            const response = await fetch('/api/profile/storage');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to load storage.');
+
+            const percentage = Number(data.percentage || 0);
+            const isHigh = percentage >= 90;
+            usageNode.textContent = `${formatBytes(data.used)} / ${formatBytes(data.total)}`;
+            usageNode.style.color = isHigh ? '#ef4444' : '';
+            barNode.style.width = `${percentage}%`;
+            barNode.style.background = isHigh ? '#ef4444' : 'var(--primary)';
+            availableNode.innerHTML = `Tersedia <strong>${formatBytes(data.available)}</strong> dari limit plan aktif.`;
+            metaNode.innerHTML = `<strong>${Number(data.fileCount || 0)}</strong> file aktif menggunakan <strong>${percentage.toFixed(1)}%</strong> storage.`;
+        } catch (error) {}
+    }
 
     window.copyText = async (elementId) => {
         const targetElement = document.getElementById(elementId);
@@ -888,6 +975,20 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch(e) {}
         });
     }
+
+    document.querySelector('.copy-ref-btn')?.addEventListener('click', () => copyText('refCode'));
+    document.querySelectorAll('.revoke-api-key-btn').forEach((button) => {
+        button.addEventListener('click', () => revokeApiKey(button.dataset.keyId));
+    });
+    document.querySelectorAll('.remove-passkey-btn').forEach((button) => {
+        button.addEventListener('click', () => removePasskey(button.dataset.passkeyId));
+    });
+    document.querySelectorAll('.revoke-session-btn').forEach((button) => {
+        button.addEventListener('click', () => revokeSession(button.dataset.deviceId));
+    });
+
+    refreshProfileStorage();
+    window.addEventListener('focus', refreshProfileStorage);
 });
 </script>
 

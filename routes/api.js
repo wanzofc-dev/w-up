@@ -26,6 +26,7 @@ const {
     r2,
     PutObjectCommand,
     GetObjectCommand,
+    DeleteObjectCommand,
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
@@ -52,7 +53,7 @@ const {
     sanitizePlainText,
     sanitizeWebhookSecret,
 } = require('../utils/security');
-const { getBillingAmount, activateProPlan } = require('../utils/billing');
+const { getBillingAmount, activateProPlan, getPlanSummary } = require('../utils/billing');
 const { getUserStorageSnapshot } = require('../utils/storage');
 const {
     hasMidtransConfig,
@@ -425,6 +426,105 @@ async function createUploadInsight(user, file, source = 'standard_upload') {
     }
 }
 
+async function createArchiveExtractInsight(user, archiveFile, extractedFiles = []) {
+    if (!user?._id || !archiveFile?._id) return;
+
+    try {
+        const sampleNames = extractedFiles.slice(0, 5).map(item => item.originalName);
+        const totalBytes = extractedFiles.reduce((sum, item) => sum + Number(item.size || 0), 0);
+        await AiInsight.create({
+            user: user._id,
+            kind: 'archive_extract',
+            title: `AI extract selesai untuk ${archiveFile.originalName}`,
+            summary: `${extractedFiles.length} file berhasil diekstrak dari arsip ${archiveFile.originalName} ke folder yang sama. Total hasil extract ${formatInsightSize(totalBytes)}.`,
+            severity: extractedFiles.length > 50 ? 'warning' : 'info',
+            metadata: {
+                fileId: archiveFile._id,
+                alias: archiveFile.customAlias,
+                filename: archiveFile.originalName,
+                source: 'archive_extract',
+                extractedCount: extractedFiles.length,
+                totalSize: totalBytes,
+                extractedNames: sampleNames,
+                suggestions: [
+                    'Tinjau file hasil extract sebelum dibagikan ke public link.',
+                    'Jalankan malware scan pada hasil extract jika arsip berasal dari pihak luar.'
+                ]
+            }
+        });
+    } catch (error) {
+        console.error('Archive extract insight failed:', error.message);
+    }
+}
+
+async function deleteR2Keys(keys = []) {
+    const uniqueKeys = Array.from(new Set(keys.filter(Boolean)));
+    if (!uniqueKeys.length) return;
+
+    await Promise.allSettled(
+        uniqueKeys.map((key) => r2.send(new DeleteObjectCommand({
+            Bucket: getR2BucketName(),
+            Key: key
+        })))
+    );
+}
+
+async function getOwnedFileTree(ownerId, rootIds = []) {
+    const seen = new Map();
+    let frontier = rootIds.filter(Boolean);
+
+    while (frontier.length) {
+        const docs = await File.find({
+            owner: ownerId,
+            $or: [
+                { _id: { $in: frontier } },
+                { parentId: { $in: frontier } }
+            ]
+        });
+
+        const nextFrontier = [];
+        for (const doc of docs) {
+            const id = String(doc._id);
+            if (seen.has(id)) continue;
+            seen.set(id, doc);
+            if (doc.isFolder) {
+                nextFrontier.push(doc._id);
+            }
+        }
+
+        frontier = nextFrontier;
+    }
+
+    return Array.from(seen.values());
+}
+
+async function permanentlyDeleteOwnedFiles(ownerId, rootIds = []) {
+    const tree = await getOwnedFileTree(ownerId, rootIds);
+    if (!tree.length) {
+        return { deletedCount: 0 };
+    }
+
+    const r2Keys = [];
+    for (const file of tree) {
+        if (file.r2Key) r2Keys.push(file.r2Key);
+        if (Array.isArray(file.versions)) {
+            file.versions.forEach((version) => {
+                if (version?.r2Key) r2Keys.push(version.r2Key);
+            });
+        }
+        if (Array.isArray(file.signatureRequests)) {
+            file.signatureRequests.forEach((entry) => {
+                if (entry?.signedFileR2Key) r2Keys.push(entry.signedFileR2Key);
+            });
+        }
+    }
+
+    await deleteR2Keys(r2Keys);
+    await File.deleteMany({ _id: { $in: tree.map((file) => file._id) } });
+
+    return { deletedCount: tree.length };
+}
+
 async function getOptionalAuthenticatedUser(req) {
     let token = req.cookies.token;
 
@@ -493,6 +593,7 @@ async function syncPaymentRecordFromMidtrans(transaction, statusPayload, rawPayl
     if (!transaction || !statusPayload) return null;
 
     const nextStatus = mapMidtransStatus(statusPayload.transaction_status, statusPayload.fraud_status);
+    const previousStatus = transaction.status;
     const wasPaid = transaction.status === 'paid';
 
     transaction.status = nextStatus;
@@ -512,16 +613,52 @@ async function syncPaymentRecordFromMidtrans(transaction, statusPayload, rawPayl
         transaction.rawNotifications = [rawPayload, ...(transaction.rawNotifications || [])].slice(0, 10);
     }
 
+    let webhookUser = null;
     if (!wasPaid && nextStatus === 'paid') {
         const user = await User.findById(transaction.user);
         if (user) {
             await activateProPlan(user, transaction.billingCycle);
             transaction.completedAt = new Date();
             if (!transaction.paidAt) transaction.paidAt = new Date();
+            webhookUser = user;
         }
     }
 
     await transaction.save();
+
+    if (previousStatus !== nextStatus) {
+        webhookUser = webhookUser || await User.findById(transaction.user);
+        if (webhookUser) {
+            triggerWebhook(webhookUser, 'billing.payment_updated', {
+                orderId: transaction.orderId,
+                status: nextStatus,
+                previousStatus,
+                billingCycle: transaction.billingCycle,
+                amount: transaction.amount,
+                paymentMethod: transaction.paymentMethod,
+                paidAt: transaction.paidAt,
+                completedAt: transaction.completedAt
+            });
+        }
+    }
+
+    if (!wasPaid && nextStatus === 'paid' && webhookUser) {
+        const storage = await getUserStorageSnapshot(webhookUser._id);
+        triggerWebhook(webhookUser, 'billing.subscription_activated', {
+            orderId: transaction.orderId,
+            plan: webhookUser.plan,
+            billingCycle: transaction.billingCycle,
+            amount: transaction.amount,
+            expiresAt: webhookUser.subscriptionExpiresAt,
+            storage: {
+                used: storage.used,
+                total: storage.total,
+                available: storage.available,
+                percentage: storage.percentage
+            }
+        });
+    }
+
     return transaction;
 }
 
@@ -648,13 +785,22 @@ router.post('/billing/sync/:orderId', auth.protectApi, async (req, res) => {
             syncedAt: new Date().toISOString()
         });
         const refreshedUser = await User.findById(req.user.id).select('plan subscriptionExpiresAt');
+        const storage = await getUserStorageSnapshot(req.user._id);
 
         res.json({
             status: transaction.status,
             paidAt: transaction.paidAt,
             completedAt: transaction.completedAt,
             plan: refreshedUser?.plan || req.user.plan,
-            expiresAt: refreshedUser?.subscriptionExpiresAt || null
+            expiresAt: refreshedUser?.subscriptionExpiresAt || null,
+            planSummary: getPlanSummary(refreshedUser?.plan || req.user.plan),
+            storage: {
+                used: storage.used,
+                total: storage.total,
+                available: storage.available,
+                percentage: storage.percentage,
+                fileCount: storage.fileCount
+            }
         });
     } catch (error) {
         console.error('Billing sync error:', error.response?.data || error.message);
@@ -1198,7 +1344,16 @@ router.put('/files/:id/protect', auth.protectApi, async (req, res) => {
 });
 
 router.delete('/files/:id', auth.protectApi, async(req, res) => {
-    await File.findOneAndUpdate({_id: req.params.id, owner: req.user.id}, {deletedAt: new Date()});
+    const file = await File.findOne({ _id: req.params.id, owner: req.user.id });
+    if (!file) return res.status(404).json({ message: 'File not found.' });
+
+    if (file.deletedAt) {
+        const result = await permanentlyDeleteOwnedFiles(req.user.id, [file._id]);
+        return res.json({ message: `Item deleted permanently (${result.deletedCount} item).` });
+    }
+
+    file.deletedAt = new Date();
+    await file.save();
     res.json({message:'File moved to trash'});
 });
 
@@ -1208,7 +1363,18 @@ router.post('/files/bulk', auth.protectApi, async (req, res) => {
 
     try {
         const query = { _id: { $in: fileIds }, owner: req.user.id };
-        if (action === 'delete') await File.updateMany(query, { deletedAt: new Date() });
+        if (action === 'delete') {
+            const files = await File.find(query).select('_id deletedAt');
+            const trashedIds = files.filter((file) => file.deletedAt).map((file) => file._id);
+            const activeIds = files.filter((file) => !file.deletedAt).map((file) => file._id);
+
+            if (activeIds.length) {
+                await File.updateMany({ _id: { $in: activeIds }, owner: req.user.id }, { deletedAt: new Date() });
+            }
+            if (trashedIds.length) {
+                await permanentlyDeleteOwnedFiles(req.user.id, trashedIds);
+            }
+        }
         else if (action === 'restore') await File.updateMany(query, { deletedAt: null });
         else if (action === 'move') await File.updateMany(query, { parentId: targetFolderId || null });
         else if (action === 'star') await File.updateMany(query, { isStarred: true });
@@ -1221,8 +1387,9 @@ router.post('/files/bulk', auth.protectApi, async (req, res) => {
 });
 
 router.delete('/trash/empty', auth.protectApi, async (req, res) => {
-    await File.deleteMany({ owner: req.user.id, deletedAt: { $ne: null } });
-    res.json({ message: 'Trash emptied' });
+    const trashedRoots = await File.find({ owner: req.user.id, deletedAt: { $ne: null } }).select('_id');
+    const result = await permanentlyDeleteOwnedFiles(req.user.id, trashedRoots.map((file) => file._id));
+    res.json({ message: `Trash emptied permanently (${result.deletedCount} item).` });
 });
 
 router.post('/files/:id/collaborator', auth.protectApi, async (req, res) => {
@@ -2104,24 +2271,61 @@ router.post('/files/:id/extract', auth.protectApi, async (req, res) => {
             return res.status(413).json({ message: 'Archive is too large for inline extraction.' });
         }
 
-        const ownerId = user ? user._id : 'guest_extract';
-        const parentId = user ? (file.parentId || null) : null;
+        const ownerId = user._id;
+        const destinationParentId = file.parentId || null;
+        const folderCache = new Map();
+        folderCache.set('', destinationParentId ? String(destinationParentId) : '');
 
-        const newFolderName = path.basename(file.originalName, path.extname(file.originalName)) + "_extracted";
-        
-        // Buat folder induk hanya jika pengguna login
-        let parentFolder = null;
-        if (user) {
-            parentFolder = new File({
-                originalName: newFolderName,
-                customAlias: await ensureUniqueAlias(`${newFolderName}_${Date.now()}`, newFolderName),
-                isFolder: true,
-                contentType: 'application/vnd.google-apps.folder',
-                owner: ownerId,
-                parentId: parentId,
-                size: 0
-            });
-            await saveFileWithUniqueAlias(parentFolder, newFolderName);
+        async function ensureArchiveFolder(relativePath = '') {
+            const normalized = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            if (!normalized) return destinationParentId;
+            if (folderCache.has(normalized)) {
+                const cached = folderCache.get(normalized);
+                return cached || null;
+            }
+
+            const segments = normalized.split('/').filter(Boolean);
+            let currentParentId = destinationParentId;
+            let builtPath = '';
+
+            for (const segment of segments) {
+                builtPath = builtPath ? `${builtPath}/${segment}` : segment;
+                if (folderCache.has(builtPath)) {
+                    currentParentId = folderCache.get(builtPath) || null;
+                    continue;
+                }
+
+                const safeSegment = sanitizeFilename(segment) || 'folder';
+                const existingFolder = await File.findOne({
+                    owner: ownerId,
+                    parentId: currentParentId || null,
+                    isFolder: true,
+                    deletedAt: null,
+                    originalName: safeSegment
+                });
+
+                if (existingFolder) {
+                    currentParentId = existingFolder._id;
+                    folderCache.set(builtPath, String(existingFolder._id));
+                    continue;
+                }
+
+                const folderDoc = new File({
+                    originalName: safeSegment,
+                    customAlias: await ensureUniqueAlias(`${safeSegment}_${Date.now()}`, safeSegment),
+                    isFolder: true,
+                    contentType: 'application/vnd.google-apps.folder',
+                    owner: ownerId,
+                    parentId: currentParentId || null,
+                    size: 0
+                });
+
+                await saveFileWithUniqueAlias(folderDoc, safeSegment);
+                currentParentId = folderDoc._id;
+                folderCache.set(builtPath, String(folderDoc._id));
+            }
+
+            return currentParentId;
         }
 
         const { Body } = await r2.send(new GetObjectCommand({ Bucket: getR2BucketName(), Key: file.r2Key }));
@@ -2133,10 +2337,24 @@ router.post('/files/:id/extract', auth.protectApi, async (req, res) => {
             if (extractedFiles.length >= MAX_EXTRACTED_FILES) {
                 throw new Error('Archive contains too many files.');
             }
-            const buffer = await entry.buffer();
-            if (entry.type === 'Directory') continue; // Lewati direktori
+            const entryPath = String(entry.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+            const cleanEntryPath = entryPath
+                .split('/')
+                .map((segment) => sanitizeFilename(segment))
+                .filter(Boolean)
+                .join('/');
 
-            const finalAlias = await ensureUniqueAlias(`${Date.now()}_${entry.path.replace(/[^a-zA-Z0-9._-]/g, '_')}`, entry.path);
+            if (entry.type === 'Directory') {
+                await ensureArchiveFolder(cleanEntryPath);
+                entry.autodrain();
+                continue;
+            }
+
+            const buffer = await entry.buffer();
+            const relativeDir = path.posix.dirname(cleanEntryPath);
+            const targetParentId = await ensureArchiveFolder(relativeDir === '.' ? '' : relativeDir);
+            const finalName = sanitizeFilename(path.posix.basename(cleanEntryPath)) || `extracted_${Date.now()}`;
+            const finalAlias = await ensureUniqueAlias(`${Date.now()}_${finalName.replace(/[^a-zA-Z0-9._-]/g, '_')}`, finalName);
             const r2Key = `${ownerId}/${finalAlias}`;
             
             await r2.send(new PutObjectCommand({
@@ -2144,23 +2362,33 @@ router.post('/files/:id/extract', auth.protectApi, async (req, res) => {
             }));
 
             const newFile = new File({
-                originalName: entry.path,
+                originalName: finalName,
                 customAlias: finalAlias,
                 contentType: 'application/octet-stream',
                 size: buffer.length,
                 storageType: 'r2',
                 r2Key,
-                owner: user ? ownerId : null, // Hanya set owner jika user login
-                parentId: parentFolder ? parentFolder._id : null // Hanya set parent jika folder dibuat
+                owner: ownerId,
+                parentId: targetParentId || null,
+                virusScan: { status: 'unscanned' }
             });
-            await saveFileWithUniqueAlias(newFile, entry.path);
+            await saveFileWithUniqueAlias(newFile, finalName);
             extractedFiles.push(newFile);
         }
 
+        await createArchiveExtractInsight(user, file, extractedFiles);
+
         res.status(201).json({ 
-            message: 'Archive extracted successfully into a new folder.', 
-            folder: parentFolder, 
-            files: extractedFiles 
+            message: 'AI extract selesai di folder yang sama dengan arsip.',
+            destinationFolderId: destinationParentId,
+            archiveParentId: destinationParentId,
+            extractedCount: extractedFiles.length,
+            extractedNames: extractedFiles.slice(0, 12).map((item) => item.originalName),
+            files: extractedFiles.map((item) => ({
+                id: item._id,
+                name: item.originalName,
+                url: `${req.protocol}://${req.get('host')}/w-upload/file/${item.customAlias}`
+            }))
         });
     } catch (error) {
         console.error("Extraction Error:", error);

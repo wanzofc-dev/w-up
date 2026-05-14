@@ -82,6 +82,36 @@
         text-decoration: none;
         font-weight: 600;
     }
+    .extract-stage-list {
+        display: grid;
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+    .extract-stage-item {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 0.8rem;
+        padding: 0.9rem 1rem;
+        border-radius: 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+    }
+    .extract-stage-item i {
+        width: 38px;
+        height: 38px;
+        border-radius: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--primary);
+        background: rgba(37,99,235,0.12);
+    }
+    .extract-stage-item.complete i {
+        color: #16a34a;
+        background: rgba(34,197,94,0.14);
+    }
+    .extract-stage-item strong { display: block; margin-bottom: 0.16rem; }
+    .extract-stage-item span { color: var(--muted-text); line-height: 1.55; font-size: 0.92rem; }
 </style>
 
 <main class="archive-shell">
@@ -92,7 +122,7 @@
 
         <div class="archive-actions">
             <button id="extractBtn" class="btn primary-btn" style="padding: 0.85rem 1.4rem;">
-                <i class="fa-solid fa-box-open"></i> Extract Files
+                <i class="fa-solid fa-sparkles"></i> AI Extract
             </button>
             <a href="<%= downloadLink %>" class="btn secondary-btn" style="padding: 0.85rem 1.4rem;">
                 <i class="fa-solid fa-download"></i> Download Archive
@@ -102,10 +132,11 @@
 
     <section class="archive-panel">
         <h3 style="margin-top:0;">Status extraction</h3>
-        <p style="color:var(--muted-text); margin-top:0;">Jika Anda login, hasil ekstraksi akan langsung masuk ke dashboard. Jika tamu, file hasil ekstraksi akan ditampilkan di sini.</p>
+        <p style="color:var(--muted-text); margin-top:0;">Hasil extract akan dimasukkan ke folder yang sama dengan arsip sumber, lalu ditandai ulang untuk scan keamanan berikutnya.</p>
+        <div class="extract-stage-list" id="extractStageList"></div>
         <div id="status"></div>
         <div id="extracted-files-container" style="display:none;">
-            <h3>Extracted Files</h3>
+            <h3>AI Extract Result</h3>
             <ul id="extracted-files-list"></ul>
         </div>
     </section>
@@ -117,51 +148,86 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusDiv = document.getElementById('status');
     const filesContainer = document.getElementById('extracted-files-container');
     const filesList = document.getElementById('extracted-files-list');
+    const extractStageList = document.getElementById('extractStageList');
+    const stages = [
+        { icon: 'fa-solid fa-magnifying-glass-chart', title: 'Inspect archive', note: 'AI membaca isi ZIP dan memetakan struktur file.' },
+        { icon: 'fa-solid fa-box-open', title: 'Extract contents', note: 'Isi arsip dipindahkan langsung ke folder yang sama.' },
+        { icon: 'fa-solid fa-shield-halved', title: 'Security rescan', note: 'File hasil extract ditandai ulang untuk review keamanan.' },
+        { icon: 'fa-solid fa-sparkles', title: 'Write AI insight', note: 'Ringkasan hasil extract dikirim ke layer AI insight.' }
+    ];
+    let extractTimer = null;
+
+    function renderStages(activeIndex = 0) {
+        extractStageList.innerHTML = stages.map((stage, index) => `
+            <div class="extract-stage-item ${index < activeIndex ? 'complete' : ''}">
+                <i class="${stage.icon}"></i>
+                <div>
+                    <strong>${stage.title}</strong>
+                    <span>${stage.note}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function animateStages() {
+        let stageIndex = 0;
+        renderStages(0);
+        clearInterval(extractTimer);
+        extractTimer = setInterval(() => {
+            stageIndex = Math.min(stages.length, stageIndex + 1);
+            renderStages(stageIndex);
+            if (stageIndex >= stages.length) {
+                clearInterval(extractTimer);
+                extractTimer = null;
+            }
+        }, 850);
+    }
 
     extractBtn.addEventListener('click', async () => {
-        statusDiv.textContent = 'Extracting archive, please wait...';
+        statusDiv.textContent = 'AI extract sedang berjalan...';
         statusDiv.className = '';
         filesContainer.style.display = 'none';
         extractBtn.disabled = true;
-        extractBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Extracting...';
+        extractBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> AI Extracting...';
+        animateStages();
 
         try {
             const res = await fetch('/api/files/<%= file._id %>/extract', {
                 method: 'POST'
             });
             const data = await res.json();
+            clearInterval(extractTimer);
+            extractTimer = null;
+            renderStages(stages.length);
 
             if (res.ok) {
-                if (data.folder) {
-                    statusDiv.textContent = `Success! Arsip diekstrak ke folder ${data.folder.originalName}.`;
-                    statusDiv.className = 'success';
-                    showToast('Archive extracted!', 'success');
+                statusDiv.textContent = data.message || 'AI extract selesai.';
+                statusDiv.className = 'success';
+                filesList.innerHTML = '';
+                (data.files || []).forEach(file => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<a href="${file.url}" target="_blank">${file.name}</a>`;
+                    filesList.appendChild(li);
+                });
+                filesContainer.style.display = 'block';
+                extractBtn.style.display = 'none';
+                showToast('AI extract selesai.', 'success');
+                if (data.destinationFolderId) {
                     setTimeout(() => {
-                        window.location.href = `/dashboard?folderId=${data.folder._id}`;
+                        window.location.href = `/dashboard?folderId=${data.destinationFolderId}`;
                     }, 1800);
-                } else if (data.files) {
-                    statusDiv.textContent = 'Extraction successful. File hasil ekstraksi tersedia di bawah ini.';
-                    statusDiv.className = 'success';
-                    filesList.innerHTML = '';
-                    data.files.forEach(file => {
-                        const li = document.createElement('li');
-                        li.innerHTML = `<a href="${file.url}" target="_blank">${file.name}</a>`;
-                        filesList.appendChild(li);
-                    });
-                    filesContainer.style.display = 'block';
-                    extractBtn.style.display = 'none';
                 }
             } else {
                 statusDiv.textContent = `Error: ${data.message}`;
                 statusDiv.className = 'error';
                 extractBtn.disabled = false;
-                extractBtn.innerHTML = '<i class="fa-solid fa-box-open"></i> Extract Files';
+                extractBtn.innerHTML = '<i class="fa-solid fa-sparkles"></i> AI Extract';
             }
         } catch (e) {
             statusDiv.textContent = 'A server error occurred. Please try again.';
             statusDiv.className = 'error';
             extractBtn.disabled = false;
-            extractBtn.innerHTML = '<i class="fa-solid fa-box-open"></i> Extract Files';
+            extractBtn.innerHTML = '<i class="fa-solid fa-sparkles"></i> AI Extract';
         }
     });
 });

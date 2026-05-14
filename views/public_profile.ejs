@@ -83,7 +83,7 @@
     .profile-hero-copy p { margin: 0.75rem 0 0; color: rgba(255,255,255,0.78); line-height: 1.78; max-width: 720px; }
     .hero-stats {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 1rem;
         margin-top: 1.4rem;
     }
@@ -168,11 +168,33 @@
     .public-file-body { padding: 1rem; }
     .public-file-body a { display: block; font-weight: 700; color: var(--text); text-decoration: none; }
     .public-file-body small { display: block; margin-top: 0.5rem; color: var(--muted-text); }
+    .public-folder-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        margin-top: 0.75rem;
+        color: var(--branded-primary);
+        text-decoration: none;
+        font-weight: 700;
+    }
+    .public-breadcrumbs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        margin: 1.35rem 0 0;
+        color: rgba(255,255,255,0.82);
+        font-size: 0.92rem;
+    }
+    .public-breadcrumbs a {
+        color: #fff;
+        text-decoration: none;
+        font-weight: 700;
+    }
     @media (max-width: 980px) {
         .public-profile-hero { grid-template-columns: 1fr; }
     }
     @media (max-width: 700px) {
-        .hero-stats { grid-template-columns: 1fr; }
+        .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .public-section-head { flex-direction: column; align-items: flex-start; }
     }
 </style>
@@ -213,6 +235,10 @@
                     <strong><%= publicStats.totalFiles %></strong>
                 </div>
                 <div class="hero-stat">
+                    <small>Total folder publik</small>
+                    <strong><%= publicStats.totalFolders %></strong>
+                </div>
+                <div class="hero-stat">
                     <small>Total download</small>
                     <strong><%= publicStats.totalDownloads %></strong>
                 </div>
@@ -220,6 +246,13 @@
                     <small>Total size</small>
                     <strong><%= (publicStats.totalSize / 1024 / 1024).toFixed(1) %> MB</strong>
                 </div>
+            </div>
+            <div class="public-breadcrumbs">
+                <a href="/u/<%= targetUser.username %>">Root</a>
+                <% (breadcrumbs || []).forEach(crumb => { %>
+                    <span>/</span>
+                    <a href="/u/<%= targetUser.username %>?folder=<%= crumb.id %>"><%= crumb.name %></a>
+                <% }) %>
             </div>
         </div>
 
@@ -243,8 +276,8 @@
 
     <div class="public-section-head">
         <div>
-            <h2>Galeri file publik</h2>
-            <p>Koleksi file yang dibagikan di halaman ini.</p>
+            <h2><%= currentFolder ? currentFolder.originalName : 'Galeri file publik' %></h2>
+            <p><%= currentFolder ? 'Folder publik ini hanya menampilkan item yang memang dibagikan dari folder tersebut.' : 'Koleksi file dan folder publik yang dibagikan di halaman ini.' %></p>
         </div>
     </div>
 
@@ -261,7 +294,9 @@
         %>
             <article class="public-file-card">
                 <div class="public-file-preview">
-                    <% if (file.contentType.startsWith('image/')) { %>
+                    <% if (file.isFolder) { %>
+                        <i class="fa-solid fa-folder-open"></i>
+                    <% } else if (file.contentType.startsWith('image/')) { %>
                         <img src="/w-upload/raw/<%= file.customAlias %>" alt="<%= file.originalName %>">
                     <% } else if (file.contentType.startsWith('video/')) { %>
                         <i class="fa-solid fa-video"></i>
@@ -274,8 +309,16 @@
                     <% } %>
                 </div>
                 <div class="public-file-body">
-                    <a href="/w-upload/file/<%= file.customAlias %>"><%= file.originalName %></a>
-                    <small><%= (file.size / 1024 / 1024).toFixed(2) %> MB | <%= file.downloads || 0 %> download</small>
+                    <% if (file.isFolder) { %>
+                        <a href="/u/<%= targetUser.username %>?folder=<%= file._id %>"><%= file.originalName %></a>
+                        <small><%= folderCountMap && folderCountMap[String(file._id)] ? folderCountMap[String(file._id)] : 0 %> item publik</small>
+                        <a class="public-folder-link" href="/u/<%= targetUser.username %>?folder=<%= file._id %>">
+                            <i class="fa-solid fa-arrow-right"></i> Buka folder
+                        </a>
+                    <% } else { %>
+                        <a href="/w-upload/file/<%= file.customAlias %>"><%= file.originalName %></a>
+                        <small><%= (file.size / 1024 / 1024).toFixed(2) %> MB | <%= file.downloads || 0 %> download</small>
+                    <% } %>
                 </div>
             </article>
         <% }) %>

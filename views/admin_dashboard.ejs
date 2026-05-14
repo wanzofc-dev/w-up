@@ -1,14 +1,18 @@
-<%- include('partials/header', { title: 'Admin Panel', pageCss: 'dashboard' }) %>
+<%- include('partials/header', { title: 'Admin Panel', pageCss: 'admin' }) %>
 
 <div class="dashboard-layout">
-    <main class="main-content" style="padding: 2rem;">
-        <div class="admin-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;">
-            <h1><i class="fa-solid fa-gauge-high"></i> Admin Console</h1>
-            <a href="/dashboard" class="btn secondary-btn">Back to App</a>
+    <main class="main-content admin-main">
+        <div class="admin-header">
+            <div>
+                <span class="admin-eyebrow"><i class="fa-solid fa-shield-halved"></i> Workspace Control</span>
+                <h1><i class="fa-solid fa-gauge-high"></i> Admin Console</h1>
+                <p class="admin-subtitle">Panel admin sekarang dirapikan untuk monitoring user, storage, plan, public request, dan global configuration dari satu layar yang lebih padat tetapi tetap nyaman dibaca.</p>
+            </div>
+            <a href="/dashboard" class="btn secondary-btn"><i class="fa-solid fa-arrow-left"></i> Back to App</a>
         </div>
 
-        <div class="stats-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:1.5rem; margin-bottom:2rem;">
-            <div class="stat-card" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
+        <div class="stats-grid">
+            <div class="stat-card">
                 <h3><i class="fa-solid fa-server"></i> Server Load</h3>
                 <div style="margin-top:10px;">
                     <p>CPU: <%= serverStats.cores %> Cores (<%= (serverStats.load || 0).toFixed(1) %>%)</p>
@@ -16,23 +20,23 @@
                     <p>Uptime: <%= (serverStats.uptime || 0).toFixed(1) %> Hrs</p>
                 </div>
             </div>
-            <div class="stat-card" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
-                <h3>Users</h3>
+            <div class="stat-card">
+                <h3><i class="fa-solid fa-users"></i> Users</h3>
                 <p style="font-size:2rem; font-weight:bold;"><%= userCount %></p>
             </div>
-            <div class="stat-card" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
-                <h3>Files</h3>
+            <div class="stat-card">
+                <h3><i class="fa-solid fa-folder-tree"></i> Files</h3>
                 <p style="font-size:2rem; font-weight:bold;"><%= fileCount %></p>
             </div>
-            <div class="stat-card" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
-                <h3>Storage</h3>
+            <div class="stat-card">
+                <h3><i class="fa-solid fa-database"></i> Storage</h3>
                 <p style="font-size:2rem; font-weight:bold;"><%= (totalSize / 1024 / 1024 / 1024).toFixed(2) %> GB</p>
             </div>
         </div>
 
-        <div class="admin-grid" style="display:grid; grid-template-columns: 3fr 1fr; gap:2rem;">
+        <div class="admin-grid">
             
-            <section class="admin-section" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
+            <section class="admin-section">
                 <h3>User Management</h3>
                 <div style="overflow-x:auto;">
                     <table style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem;">
@@ -53,9 +57,13 @@
                                         <br><small><%= u.email || 'No Email' %></small>
                                     </td>
                                     <td style="padding:0.5rem;">
-                                        <form action="/admin/users/<%= u._id %>/update" method="POST" style="display:flex; gap:5px; margin-bottom:5px;">
+                                        <div class="admin-plan-chip <%= u.plan === 'pro' ? 'pro' : 'free' %>">
+                                            <i class="fa-solid <%= u.plan === 'pro' ? 'fa-crown' : 'fa-seedling' %>"></i>
+                                            <span><%= u.plan === 'pro' ? 'PRO' : 'FREE' %></span>
+                                        </div>
+                                        <form action="/admin/users/<%= u._id %>/update" method="POST" style="display:flex; gap:5px; margin-bottom:5px; margin-top:8px;">
                                             <input type="hidden" name="action" value="plan">
-                                            <select name="value" onchange="this.form.submit()" style="padding:2px; border-radius:4px; border:1px solid var(--border);">
+                                            <select name="value" class="plan-select-submit" style="padding:2px; border-radius:4px; border:1px solid var(--border);">
                                                 <option value="free" <%= u.plan === 'free' ? 'selected' : '' %>>Free</option>
                                                 <option value="pro" <%= u.plan === 'pro' ? 'selected' : '' %>>Pro</option>
                                             </select>
@@ -78,7 +86,7 @@
                                         <div style="display:flex; gap:0.5rem;">
                                             <a href="/admin/impersonate/<%= u._id %>" class="btn secondary-btn" style="padding:0.3rem 0.6rem;" title="Login as User"><i class="fa-solid fa-mask"></i></a>
                                             <% if(!u.isBanned) { %>
-                                                <form action="/admin/users/<%= u._id %>/update" method="POST" onsubmit="return confirm('Ban user?');">
+                                                <form action="/admin/users/<%= u._id %>/update" method="POST" class="confirm-ban-form">
                                                     <input type="hidden" name="action" value="ban">
                                                     <button class="btn danger-btn" style="padding:0.3rem 0.6rem;"><i class="fa-solid fa-ban"></i></button>
                                                 </form>
@@ -103,7 +111,7 @@
                 </div>
             </section>
 
-                <section class="admin-section" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
+                <section class="admin-section">
                     <h3><i class="fa-solid fa-inbox"></i> Public Requests</h3>
                     <ul style="list-style:none; padding:0; margin-top:1rem; max-height: 300px; overflow-y: auto;">
                         <% if(publicRequests.length > 0) { %>
@@ -138,7 +146,7 @@
                 
             <div class="sidebar-col" style="display:flex; flex-direction:column; gap:2rem;">
                 
-                <section class="admin-section" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
+                <section class="admin-section">
                     <h3>Global Config</h3>
                     <form action="/admin/config" method="POST" style="display:flex; flex-direction:column; gap:1rem; margin-top:1rem;">
                         <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -165,7 +173,7 @@
                     </form>
                 </section>
 
-                <section class="admin-section" style="background:var(--card); padding:1.5rem; border-radius:12px; border:1px solid var(--border);">
+                <section class="admin-section">
                     <h3>Affiliate Payouts</h3>
                     <ul style="list-style:none; padding:0; margin-top:1rem;">
                         <% if(topAffiliates.length > 0) { %>
@@ -176,7 +184,7 @@
                                         <div style="font-size:0.8rem; color:green;">$<%= (aff.walletBalance || 0).toFixed(2) %></div>
                                         <div style="font-size:0.7rem; color:var(--muted-text);"><%= aff.referralCount || 0 %> Refs</div>
                                     </div>
-                                    <form action="/admin/payout/<%= aff._id %>" method="POST" onsubmit="return confirm('Mark as paid?');">
+                                    <form action="/admin/payout/<%= aff._id %>" method="POST" class="confirm-payout-form">
                                         <button class="btn secondary-btn" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Pay</button>
                                     </form>
                                 </li>
@@ -192,17 +200,26 @@
     </main>
 </div>
 
-<style>
-    .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .4s; border-radius: 34px; }
-    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-    input:checked + .slider { background-color: var(--primary); }
-    input:checked + .slider:before { transform: translateX(18px); }
-    @media (max-width: 1024px) {
-        .admin-layout-grid { grid-template-columns: 1fr !important; }
-        .col-main { grid-column: span 1 !important; }
-    }
-</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.plan-select-submit').forEach((select) => {
+        select.addEventListener('change', () => select.form?.submit());
+    });
+    document.querySelectorAll('.confirm-ban-form').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            if (!confirm('Ban user?')) {
+                event.preventDefault();
+            }
+        });
+    });
+    document.querySelectorAll('.confirm-payout-form').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            if (!confirm('Mark as paid?')) {
+                event.preventDefault();
+            }
+        });
+    });
+});
+</script>
 
 <%- include('partials/footer') %>
