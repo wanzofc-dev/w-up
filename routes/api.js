@@ -1872,7 +1872,7 @@ router.post('/files/:id/save-version', auth.protectApi, async (req, res) => {
         const newR2Key = `${req.user.id}/${Date.now()}_v${file.versions.length + 2}_${file.originalName}`;
         
         await r2.send(new PutObjectCommand({
-            Bucket: getBucketName(),
+            Bucket: getR2BucketName(),
             Key: newR2Key,
             Body: buffer,
             ContentType: file.contentType

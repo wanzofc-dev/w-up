@@ -16,7 +16,7 @@
 <script>
     const imageEditor = new tui.ImageEditor('#tui-image-editor-container', {
         includeUI: {
-            loadImage: { path: '/w-upload/raw/<%= file.customAlias %>', name: '<%= file.originalName %>' },
+            loadImage: { path: '<%= downloadLink %>', name: '<%= file.originalName %>' },
             theme: 'dark',
             menu: ['crop', 'flip', 'rotate', 'draw', 'shape', 'icon', 'text', 'mask', 'filter'],
             initMenu: 'filter',

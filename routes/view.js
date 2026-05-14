@@ -524,15 +524,33 @@ router.get('/w-upload/raw/:identifier', auth.checkAuthStatus, async (req, res) =
 
         if (file.storageType === 'r2' && file.r2Key) {
             try {
-                const command = new GetObjectCommand({
+                const range = typeof req.headers.range === 'string' ? req.headers.range : '';
+                const commandInput = {
                     Bucket: getR2BucketName(),
                     Key: file.r2Key
-                });
+                };
+
+                if (range) {
+                    commandInput.Range = range;
+                }
+
+                const command = new GetObjectCommand(commandInput);
                 
                 const response = await r2.send(command);
                 res.setHeader('Content-Type', file.contentType);
-                res.setHeader('Content-Length', file.size);
                 res.setHeader('Content-Disposition', `inline; filename="${file.originalName}"`);
+                res.setHeader('Accept-Ranges', 'bytes');
+
+                if (range && response.ContentRange) {
+                    res.status(206);
+                    res.setHeader('Content-Range', response.ContentRange);
+                    if (response.ContentLength !== undefined) {
+                        res.setHeader('Content-Length', response.ContentLength);
+                    }
+                } else {
+                    res.setHeader('Content-Length', file.size);
+                }
+
                 response.Body.pipe(res);
 
                 if (file.isBurnAfterRead) {

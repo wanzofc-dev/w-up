@@ -4,34 +4,26 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const DEFAULT_R2_ACCOUNT_ID = 'ec786e5c4cd0818807637b34da897d76';
 const DEFAULT_R2_ENDPOINT = 'https://ec786e5c4cd0818807637b34da897d76.r2.cloudflarestorage.com';
 const DEFAULT_R2_BUCKET_NAME = 'wanzofc';
+const DEFAULT_R2_ACCESS_KEY_ID = 'e7ae1b337e897bac0cf15ab7c02f297e';
+const DEFAULT_R2_SECRET_ACCESS_KEY = '678c88269339ab870b2e74724447a770394228bbf502ab8a7b93481dba286906';
 
 function getR2AccountId() {
-    return process.env.R2_ACCOUNT_ID || DEFAULT_R2_ACCOUNT_ID;
+    return DEFAULT_R2_ACCOUNT_ID;
 }
 
 function getR2Endpoint() {
-    if (process.env.R2_ENDPOINT) {
-        return process.env.R2_ENDPOINT;
-    }
-
     const accountId = getR2AccountId();
-    return accountId
-        ? `https://${accountId}.r2.cloudflarestorage.com`
-        : DEFAULT_R2_ENDPOINT;
+    return accountId ? `https://${accountId}.r2.cloudflarestorage.com` : DEFAULT_R2_ENDPOINT;
 }
 
 function getR2BucketName() {
-    return process.env.R2_BUCKET_NAME || DEFAULT_R2_BUCKET_NAME;
+    return DEFAULT_R2_BUCKET_NAME;
 }
 
 function getR2Credentials() {
-    if (!process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY) {
-        throw new Error('R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY must be defined.');
-    }
-
     return {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+        accessKeyId: DEFAULT_R2_ACCESS_KEY_ID,
+        secretAccessKey: DEFAULT_R2_SECRET_ACCESS_KEY,
     };
 }
 
