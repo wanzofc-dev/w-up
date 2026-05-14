@@ -360,6 +360,28 @@
                         <div class="form-actions">
                             <button id="saveWebhookBtn" class="btn primary-btn">Save Configuration</button>
                         </div>
+                        <div class="items-list" id="webhookDeliveriesList" style="margin-top:1rem;">
+                            <% const webhookDeliveries = (user.webhook && user.webhook.deliveries) ? user.webhook.deliveries : []; %>
+                            <% if (webhookDeliveries.length > 0) { %>
+                                <% webhookDeliveries.forEach((delivery) => { %>
+                                    <div class="list-item">
+                                        <div class="item-info">
+                                            <div class="item-title"><%= delivery.event %> · <%= delivery.status %></div>
+                                            <div class="item-meta">
+                                                <span>HTTP <%= delivery.responseStatus || 0 %></span>
+                                                <span>Retry <%= delivery.retryCount || 0 %>/<%= delivery.maxRetries || 0 %></span>
+                                                <span><%= delivery.lastAttemptAt ? new Date(delivery.lastAttemptAt).toLocaleString('id-ID') : '-' %></span>
+                                            </div>
+                                            <% if (delivery.error) { %>
+                                                <small class="field-help" style="margin-top:0.3rem;"><%= delivery.error %></small>
+                                            <% } %>
+                                        </div>
+                                    </div>
+                                <% }) %>
+                            <% } else { %>
+                                <p class="text-muted" style="text-align:center; padding:1rem;">Belum ada log delivery webhook.</p>
+                            <% } %>
+                        </div>
                     </div>
                 </section>
 
@@ -653,6 +675,30 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {}
     }
 
+    function renderWebhookDeliveries(deliveries = []) {
+        const list = document.getElementById('webhookDeliveriesList');
+        if (!list) return;
+
+        if (!Array.isArray(deliveries) || deliveries.length === 0) {
+            list.innerHTML = '<p class="text-muted" style="text-align:center; padding:1rem;">Belum ada log delivery webhook.</p>';
+            return;
+        }
+
+        list.innerHTML = deliveries.map((delivery) => `
+            <div class="list-item">
+                <div class="item-info">
+                    <div class="item-title">${delivery.event || 'unknown'} · ${delivery.status || 'failed'}</div>
+                    <div class="item-meta">
+                        <span>HTTP ${Number(delivery.responseStatus || 0)}</span>
+                        <span>Retry ${Number(delivery.retryCount || 0)}/${Number(delivery.maxRetries || 0)}</span>
+                        <span>${delivery.lastAttemptAt ? new Date(delivery.lastAttemptAt).toLocaleString('id-ID') : '-'}</span>
+                    </div>
+                    ${delivery.error ? `<small class="field-help" style="margin-top:0.3rem;">${delivery.error}</small>` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
     window.copyText = async (elementId) => {
         const targetElement = document.getElementById(elementId);
         if (!targetElement) {
@@ -817,8 +863,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url, secret, isActive })
                 });
-                if(res.ok) showToast('Webhook configuration saved', 'success');
-                else showToast('Failed to save webhook', 'error');
+                const data = await res.json();
+                if(res.ok) {
+                    renderWebhookDeliveries(data.webhook?.deliveries || []);
+                    showToast('Webhook configuration saved', 'success');
+                } else showToast(data.message || 'Failed to save webhook', 'error');
             } catch(e) { showToast('Network error', 'error'); }
         });
     }
@@ -828,8 +877,11 @@ document.addEventListener('DOMContentLoaded', () => {
         testWebhookBtn.addEventListener('click', async () => {
             try {
                 const res = await fetch('/api/profile/webhook/test', { method: 'POST' });
-                if(res.ok) showToast('Test ping sent!', 'success');
-                else showToast('Failed to send test ping', 'error');
+                const data = await res.json();
+                if(res.ok) {
+                    renderWebhookDeliveries(data.webhook?.deliveries || []);
+                    showToast(data.message || 'Test ping sent!', 'success');
+                } else showToast(data.message || 'Failed to send test ping', 'error');
             } catch(e) { showToast('Network error', 'error'); }
         });
     }
@@ -988,6 +1040,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     refreshProfileStorage();
+    renderWebhookDeliveries(<%- JSON.stringify((user.webhook && user.webhook.deliveries) ? user.webhook.deliveries : []) %>);
     window.addEventListener('focus', refreshProfileStorage);
 });
 </script>

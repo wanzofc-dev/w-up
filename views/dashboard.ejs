@@ -875,6 +875,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function refreshDashboardSummary() {
+        try {
+            const response = await fetch('/api/dashboard/summary');
+            const data = await response.json();
+            if (!response.ok || !data.stats) return;
+            dashboardState.stats.ownedFiles = Number(data.stats.ownedFiles || 0);
+            dashboardState.stats.ownedFolders = Number(data.stats.ownedFolders || 0);
+            dashboardState.stats.sharedItems = Number(data.stats.sharedItems || 0);
+            dashboardState.stats.currentUsage = Number(data.stats.currentUsage || 0);
+            dashboardState.stats.totalDownloads = Number(data.stats.totalDownloads || 0);
+            dashboardState.storage.total = Number(data.stats.totalStorage || 0);
+            updateDashboardStatsUi();
+        } catch (error) {}
+    }
+
     function openUploadProgressModal(totalFiles) {
         uploadProgressModal.classList.add('active');
         closeUploadProgressBtn.disabled = true;
@@ -1080,6 +1095,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if(sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
     closeUploadProgressBtn?.addEventListener('click', () => closeUploadProgressModal());
     updateDashboardStatsUi();
+    refreshDashboardSummary();
+    window.addEventListener('focus', refreshDashboardSummary);
 
     document.getElementById('quickUploadBtn')?.addEventListener('click', () => document.getElementById('uploadBtn').click());
     document.getElementById('quickFolderBtn')?.addEventListener('click', () => document.getElementById('newFolderBtn').click());
@@ -1443,6 +1460,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             const data = await res.json();
             if (res.ok) {
+                if (data.stats) {
+                    dashboardState.stats.ownedFiles = Number(data.stats.ownedFiles || 0);
+                    dashboardState.stats.ownedFolders = Number(data.stats.ownedFolders || 0);
+                    dashboardState.stats.sharedItems = Number(data.stats.sharedItems || 0);
+                    dashboardState.stats.currentUsage = Number(data.stats.currentUsage || 0);
+                    dashboardState.stats.totalDownloads = Number(data.stats.totalDownloads || 0);
+                    if (data.stats.totalStorage !== undefined) {
+                        dashboardState.storage.total = Number(data.stats.totalStorage || 0);
+                    }
+                    updateDashboardStatsUi();
+                    window.dispatchEvent(new Event('storage:refresh'));
+                }
                 showToast(data.message || 'Action completed!', 'success');
                 return data;
             } else {
