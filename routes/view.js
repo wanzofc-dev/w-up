@@ -10,10 +10,11 @@ const Team = require('../models/team');
 const LinkVisit = require('../models/linkVisit');
 const FileRequest = require('../models/fileRequest');
 const PaymentTransaction = require('../models/paymentTransaction');
+const DeveloperRequestLog = require('../models/developerRequestLog');
 const { getUserStorageSnapshot } = require('../utils/storage');
 const auth = require('../middleware/auth');
 const { r2, GetObjectCommand, DeleteObjectCommand, getR2BucketName } = require('../utils/r2');
-const { getBillingPricing, getPlanCatalog, getPlanSummary } = require('../utils/billing');
+const { getBillingPricing, getPlanCatalog, getPlanSummary, hasProPlanAccess } = require('../utils/billing');
 const { getMidtransConfig, getSnapScriptUrl, hasMidtransConfig } = require('../utils/midtrans');
 
 function getRequestOrigin(req) {
@@ -86,6 +87,31 @@ router.get('/profile', auth.protectView, async (req, res) => {
 
 router.get('/docs', auth.checkAuthStatus, (req, res) => {
     res.render('docs');
+});
+
+router.get('/developer', auth.protectView, async (req, res) => {
+    try {
+        const [storageSnapshot, recentLogs, recentTransactions] = await Promise.all([
+            getUserStorageSnapshot(req.user._id),
+            DeveloperRequestLog.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(12).lean(),
+            PaymentTransaction.find({ user: req.user._id })
+                .sort({ createdAt: -1 })
+                .limit(6)
+                .select('orderId amount billingCycle status paymentMethod createdAt')
+                .lean()
+        ]);
+
+        res.render('developer_center', {
+            storageSnapshot,
+            currentPlanSummary: getPlanSummary(req.user.plan),
+            apiKeyLimit: req.user.plan === 'pro' ? 25 : 3,
+            recentLogs,
+            recentTransactions,
+            brandingAvailable: hasProPlanAccess(req.user)
+        });
+    } catch (error) {
+        res.status(500).send('Error loading developer center.');
+    }
 });
 
 router.get('/media/user/:userId/:assetType', async (req, res) => {

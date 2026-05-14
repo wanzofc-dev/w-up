@@ -54,7 +54,18 @@ const UserSchema = new mongoose.Schema({
   webhook: {
     url: { type: String, default: '' },
     secret: { type: String, default: '' },
-    isActive: { type: Boolean, default: false }
+    isActive: { type: Boolean, default: false },
+    deliveries: [{
+      event: { type: String, default: '' },
+      status: { type: String, enum: ['delivered', 'failed'], default: 'failed' },
+      responseStatus: { type: Number, default: 0 },
+      retryCount: { type: Number, default: 0 },
+      maxRetries: { type: Number, default: 0 },
+      endpoint: { type: String, default: '' },
+      error: { type: String, default: '' },
+      deliveredAt: { type: Date },
+      lastAttemptAt: { type: Date, default: Date.now }
+    }]
   },
   isPublicProfile: { type: Boolean, default: false },
   publicBio: { type: String, default: '' },

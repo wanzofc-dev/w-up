@@ -1,0 +1,395 @@
+<%- include('partials/header', { title: 'Developer Center', pageCss: 'dashboard' }) %>
+<%
+    const storage = storageSnapshot || { used: 0, total: 0, available: 0, percentage: 0, fileCount: 0 };
+    const formatBytes = (value = 0) => {
+        const numeric = Number(value || 0);
+        if (numeric >= 1024 * 1024 * 1024) return `${(numeric / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
+        if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
+        return `${numeric.toFixed(0)} B`;
+    };
+    const endpointGroups = [
+        { method: 'GET', path: '/api/profile/api-keys', desc: 'List masked API keys dan limit plan aktif.' },
+        { method: 'POST', path: '/api/profile/api-key', desc: 'Generate key baru untuk backend, bot, atau worker.' },
+        { method: 'POST', path: '/api/profile/webhook/test', desc: 'Test delivery webhook dan lihat status endpoint.' },
+        { method: 'POST', path: '/api/upload', desc: 'Upload standar base64 JSON.' },
+        { method: 'POST', path: '/api/upload/remote', desc: 'Remote upload langsung dari URL publik.' },
+        { method: 'POST', path: '/api/upload/chunk/init', desc: 'Mulai multipart upload untuk file besar.' },
+        { method: 'GET', path: '/api/developer/overview', desc: 'Ringkasan developer surface live.' },
+        { method: 'GET', path: '/api/developer/logs', desc: 'Request log developer terbaru.' }
+    ];
+    const aiTools = [
+        'AI Widget + Workspace Intelligence',
+        'AI Extract progress workflow',
+        'OCR trigger untuk image',
+        'Security posture + cyber risk prompts',
+        'Archive extract insight',
+        'Upload insight otomatis'
+    ];
+%>
+
+<div class="dashboard-layout">
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <%- include('partials/sidebar') %>
+
+    <main class="main-content">
+        <section class="action-bar">
+            <div class="left-actions">
+                <button class="icon-btn mobile-menu-btn" id="sidebarToggle">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h1 style="font-size: 1.5rem; margin: 0;">Developer Center</h1>
+            </div>
+        </section>
+
+        <div class="developer-shell">
+            <section class="developer-hero">
+                <div>
+                    <span class="developer-eyebrow">Developer Surface</span>
+                    <h2>Semua fitur developer sekarang punya panel sendiri untuk API, webhook, AI tools, branding, dan request logs.</h2>
+                    <p>Gunakan halaman ini untuk memantau integrasi server-to-server, webhook delivery, endpoint penting, billing sync, dan kemampuan AI yang sudah aktif di akun Anda.</p>
+                </div>
+                <div class="developer-hero-stats">
+                    <div class="developer-mini-card">
+                        <small>Plan aktif</small>
+                        <strong><i class="fa-solid <%= currentPlanSummary.icon %>"></i> <%= currentPlanSummary.name %></strong>
+                    </div>
+                    <div class="developer-mini-card">
+                        <small>API keys</small>
+                        <strong id="devApiKeyUsage"><%= user.apiKeys ? user.apiKeys.length : 0 %> / <%= apiKeyLimit %></strong>
+                    </div>
+                    <div class="developer-mini-card">
+                        <small>Webhook</small>
+                        <strong id="devWebhookStatus"><%= user.webhook?.isActive ? 'Active' : 'Inactive' %></strong>
+                    </div>
+                    <div class="developer-mini-card">
+                        <small>Storage</small>
+                        <strong id="devStorageUsage"><%= formatBytes(storage.used) %> / <%= formatBytes(storage.total) %></strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="developer-grid">
+                <article class="developer-card">
+                    <div class="section-head">
+                        <div>
+                            <h3><i class="fa-solid fa-key"></i> API Keys</h3>
+                            <p>Kelola akses server-to-server per akun dengan limit yang mengikuti plan Anda.</p>
+                        </div>
+                        <a href="/profile" class="btn secondary-btn">Open Profile</a>
+                    </div>
+                    <div class="developer-stat-rail">
+                        <div class="developer-stat-box">
+                            <small>Used</small>
+                            <strong id="devApiKeyUsedCount"><%= user.apiKeys ? user.apiKeys.length : 0 %></strong>
+                        </div>
+                        <div class="developer-stat-box">
+                            <small>Limit</small>
+                            <strong id="devApiKeyLimit"><%= apiKeyLimit %></strong>
+                        </div>
+                    </div>
+                    <div class="items-list">
+                        <% if (user.apiKeys && user.apiKeys.length > 0) { %>
+                            <% user.apiKeys.forEach((apiKey) => { %>
+                                <div class="list-item">
+                                    <div class="item-info">
+                                        <div class="item-title"><%= apiKey.label %></div>
+                                        <div class="item-meta"><code><%= (apiKey.keyPrefix || 'wu_').concat('...') %></code></div>
+                                    </div>
+                                </div>
+                            <% }) %>
+                        <% } else { %>
+                            <p class="text-muted" style="text-align:center;">Belum ada API key aktif.</p>
+                        <% } %>
+                    </div>
+                </article>
+
+                <article class="developer-card">
+                    <div class="section-head">
+                        <div>
+                            <h3><i class="fa-solid fa-wave-square"></i> Webhook Delivery Logs</h3>
+                            <p>Amati status endpoint keluar Anda tanpa membuka database manual.</p>
+                        </div>
+                        <button id="refreshDeveloperBtn" class="btn secondary-btn" type="button">Refresh</button>
+                    </div>
+                    <div id="developerWebhookList" class="items-list">
+                        <% const deliveries = (user.webhook && user.webhook.deliveries) ? user.webhook.deliveries : []; %>
+                        <% if (deliveries.length > 0) { %>
+                            <% deliveries.forEach((delivery) => { %>
+                                <div class="list-item">
+                                    <div class="item-info">
+                                        <div class="item-title"><%= delivery.event %> · <%= delivery.status %></div>
+                                        <div class="item-meta">
+                                            <span>HTTP <%= delivery.responseStatus || 0 %></span>
+                                            <span>Retry <%= delivery.retryCount || 0 %>/<%= delivery.maxRetries || 0 %></span>
+                                            <span><%= delivery.lastAttemptAt ? new Date(delivery.lastAttemptAt).toLocaleString('id-ID') : '-' %></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            <% }) %>
+                        <% } else { %>
+                            <p class="text-muted" style="text-align:center;">Belum ada delivery log webhook.</p>
+                        <% } %>
+                    </div>
+                </article>
+
+                <article class="developer-card">
+                    <div class="section-head">
+                        <div>
+                            <h3><i class="fa-solid fa-brain"></i> AI Developer Tools</h3>
+                            <p>Fitur AI yang aktif untuk developer workflow, upload analysis, dan extraction context.</p>
+                        </div>
+                    </div>
+                    <div class="developer-pill-grid">
+                        <% aiTools.forEach((item) => { %>
+                            <span class="developer-pill"><%= item %></span>
+                        <% }) %>
+                    </div>
+                </article>
+
+                <article class="developer-card">
+                    <div class="section-head">
+                        <div>
+                            <h3><i class="fa-solid fa-palette"></i> Branding PRO</h3>
+                            <p>Branding page title, color, dan logo sekarang ditegakkan di backend.</p>
+                        </div>
+                    </div>
+                    <div class="developer-stat-rail">
+                        <div class="developer-stat-box">
+                            <small>Access</small>
+                            <strong id="devBrandingAccess"><%= brandingAvailable ? 'PRO Enabled' : '403 Locked' %></strong>
+                        </div>
+                        <div class="developer-stat-box">
+                            <small>Configured</small>
+                            <strong id="devBrandingConfigured"><%= user.branding?.logoUrl || user.branding?.pageTitle ? 'Yes' : 'No' %></strong>
+                        </div>
+                    </div>
+                    <a href="/profile" class="btn primary-btn" style="width:100%; justify-content:center;">
+                        <i class="fa-solid fa-up-right-from-square"></i> Manage Branding
+                    </a>
+                </article>
+
+                <article class="developer-card developer-card-wide">
+                    <div class="section-head">
+                        <div>
+                            <h3><i class="fa-solid fa-book-open"></i> Internal Docs Endpoints</h3>
+                            <p>Endpoint inti yang paling sering dipakai oleh backend, bot, worker, dan panel internal.</p>
+                        </div>
+                    </div>
+                    <div class="endpoint-list">
+                        <% endpointGroups.forEach((endpoint) => { %>
+                            <div class="endpoint-row">
+                                <span class="endpoint-method <%= endpoint.method.toLowerCase() %>"><%= endpoint.method %></span>
+                                <code><%= endpoint.path %></code>
+                                <span><%= endpoint.desc %></span>
+                            </div>
+                        <% }) %>
+                    </div>
+                </article>
+
+                <article class="developer-card developer-card-wide">
+                    <div class="section-head">
+                        <div>
+                            <h3><i class="fa-solid fa-chart-line"></i> API Usage / Request Logs</h3>
+                            <p>Ringkasan request developer terbaru dari upload, API key, webhook, branding, analytics, OCR, extract, dan billing.</p>
+                        </div>
+                    </div>
+                    <div id="developerLogsTable" class="developer-log-table">
+                        <% if (recentLogs && recentLogs.length > 0) { %>
+                            <% recentLogs.forEach((log) => { %>
+                                <div class="developer-log-row">
+                                    <strong><%= log.feature %></strong>
+                                    <span><%= log.method %></span>
+                                    <span><%= log.statusCode %></span>
+                                    <span><%= log.authType %></span>
+                                    <span><%= new Date(log.createdAt).toLocaleString('id-ID') %></span>
+                                </div>
+                            <% }) %>
+                        <% } else { %>
+                            <p class="text-muted" style="text-align:center;">Belum ada request log developer.</p>
+                        <% } %>
+                    </div>
+                </article>
+            </section>
+        </div>
+    </main>
+</div>
+
+<style>
+    .developer-shell { padding: 1.5rem; max-width: 1260px; margin: 0 auto; display: grid; gap: 1.3rem; }
+    .developer-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.95fr);
+        gap: 1.2rem;
+        padding: 1.7rem;
+        border-radius: 30px;
+        color: #fff;
+        background:
+            radial-gradient(circle at top right, rgba(249,115,22,0.2), transparent 28%),
+            linear-gradient(135deg, rgba(15,23,42,0.98), rgba(29,78,216,0.92));
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+    .developer-eyebrow {
+        display: inline-flex;
+        padding: 0.35rem 0.72rem;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.12);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+    .developer-hero h2 { margin: 0.9rem 0 0.75rem; font-size: clamp(1.8rem, 3vw, 2.7rem); line-height: 1.12; }
+    .developer-hero p { margin: 0; color: rgba(255,255,255,0.76); line-height: 1.75; }
+    .developer-hero-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+    .developer-mini-card, .developer-card, .developer-stat-box, .endpoint-row, .developer-log-row {
+        background: var(--card);
+        border: 1px solid var(--border);
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.06);
+    }
+    .developer-mini-card {
+        border-radius: 22px;
+        padding: 1rem;
+        background: rgba(255,255,255,0.1);
+        border-color: rgba(255,255,255,0.12);
+    }
+    .developer-mini-card small { display: block; color: rgba(255,255,255,0.7); margin-bottom: 0.3rem; }
+    .developer-mini-card strong { font-size: 1.08rem; }
+    .developer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
+    .developer-card { border-radius: 24px; padding: 1.3rem; }
+    .developer-card-wide { grid-column: 1 / -1; }
+    .developer-stat-rail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; margin-bottom: 1rem; }
+    .developer-stat-box { border-radius: 18px; padding: 0.95rem; background: var(--bg-secondary); }
+    .developer-stat-box small { display: block; color: var(--muted-text); margin-bottom: 0.25rem; }
+    .developer-stat-box strong { font-size: 1.1rem; }
+    .developer-pill-grid { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+    .developer-pill {
+        display: inline-flex;
+        padding: 0.55rem 0.78rem;
+        border-radius: 999px;
+        background: rgba(37,99,235,0.08);
+        color: #1d4ed8;
+        font-weight: 700;
+        font-size: 0.86rem;
+    }
+    .endpoint-list, .developer-log-table { display: grid; gap: 0.7rem; }
+    .endpoint-row, .developer-log-row {
+        border-radius: 18px;
+        padding: 0.9rem 1rem;
+        display: grid;
+        gap: 0.55rem;
+        align-items: center;
+    }
+    .endpoint-row { grid-template-columns: auto auto minmax(0, 1fr); }
+    .developer-log-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .endpoint-method {
+        display: inline-flex;
+        justify-content: center;
+        padding: 0.3rem 0.55rem;
+        border-radius: 999px;
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 800;
+    }
+    .endpoint-method.get { background: #2563eb; }
+    .endpoint-method.post { background: #16a34a; }
+    .endpoint-method.put { background: #d97706; }
+    .endpoint-method.delete { background: #dc2626; }
+    @media (max-width: 1024px) {
+        .developer-hero, .developer-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+        .developer-shell { padding: 1rem; }
+        .developer-hero-stats, .developer-stat-rail, .developer-log-row, .endpoint-row { grid-template-columns: 1fr; }
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const sidebar = document.getElementById('mainSidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+    const refreshBtn = document.getElementById('refreshDeveloperBtn');
+
+    function toggleSidebar() {
+        if (sidebar) sidebar.classList.toggle('active');
+        if (sidebarOverlay) sidebarOverlay.classList.toggle('active');
+    }
+
+    if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+    if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', toggleSidebar);
+    if (sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
+
+    function renderLogs(logs = []) {
+        const table = document.getElementById('developerLogsTable');
+        if (!table) return;
+        if (!Array.isArray(logs) || logs.length === 0) {
+            table.innerHTML = '<p class="text-muted" style="text-align:center;">Belum ada request log developer.</p>';
+            return;
+        }
+        table.innerHTML = logs.map((log) => `
+            <div class="developer-log-row">
+                <strong>${log.feature || '-'}</strong>
+                <span>${log.method || '-'}</span>
+                <span>${Number(log.statusCode || 0)}</span>
+                <span>${log.authType || '-'}</span>
+                <span>${log.createdAt ? new Date(log.createdAt).toLocaleString('id-ID') : '-'}</span>
+            </div>
+        `).join('');
+    }
+
+    function renderWebhook(deliveries = []) {
+        const list = document.getElementById('developerWebhookList');
+        if (!list) return;
+        if (!Array.isArray(deliveries) || deliveries.length === 0) {
+            list.innerHTML = '<p class="text-muted" style="text-align:center;">Belum ada delivery log webhook.</p>';
+            return;
+        }
+        list.innerHTML = deliveries.map((delivery) => `
+            <div class="list-item">
+                <div class="item-info">
+                    <div class="item-title">${delivery.event || 'unknown'} · ${delivery.status || 'failed'}</div>
+                    <div class="item-meta">
+                        <span>HTTP ${Number(delivery.responseStatus || 0)}</span>
+                        <span>Retry ${Number(delivery.retryCount || 0)}/${Number(delivery.maxRetries || 0)}</span>
+                        <span>${delivery.lastAttemptAt ? new Date(delivery.lastAttemptAt).toLocaleString('id-ID') : '-'}</span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function formatBytes(value) {
+        const numeric = Number(value || 0);
+        if (numeric >= 1024 * 1024 * 1024) return `${(numeric / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (numeric >= 1024 * 1024) return `${(numeric / 1024 / 1024).toFixed(2)} MB`;
+        if (numeric >= 1024) return `${(numeric / 1024).toFixed(2)} KB`;
+        return `${numeric.toFixed(0)} B`;
+    }
+
+    async function refreshDeveloperOverview() {
+        try {
+            const response = await fetch('/api/developer/overview');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to load developer overview.');
+
+            document.getElementById('devApiKeyUsage').textContent = `${data.apiKeys.used} / ${data.apiKeys.limit}`;
+            document.getElementById('devApiKeyUsedCount').textContent = data.apiKeys.used;
+            document.getElementById('devApiKeyLimit').textContent = data.apiKeys.limit;
+            document.getElementById('devWebhookStatus').textContent = data.webhook.isActive ? 'Active' : 'Inactive';
+            document.getElementById('devStorageUsage').textContent = `${formatBytes(data.storage.used)} / ${formatBytes(data.storage.total)}`;
+            document.getElementById('devBrandingAccess').textContent = data.branding.available ? 'PRO Enabled' : '403 Locked';
+            document.getElementById('devBrandingConfigured').textContent = data.branding.configured ? 'Yes' : 'No';
+            renderWebhook(data.webhook.deliveries || []);
+            renderLogs(data.logs || []);
+        } catch (error) {}
+    }
+
+    refreshBtn?.addEventListener('click', refreshDeveloperOverview);
+    refreshDeveloperOverview();
+    window.addEventListener('focus', refreshDeveloperOverview);
+});
+</script>
+
+<%- include('partials/footer') %>

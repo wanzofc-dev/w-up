@@ -22,6 +22,7 @@ const User = require('../models/user');
 const Team = require('../models/team');
 const PaymentTransaction = require('../models/paymentTransaction');
 const AiInsight = require('../models/aiInsight');
+const DeveloperRequestLog = require('../models/developerRequestLog');
 const {
     r2,
     PutObjectCommand,
@@ -53,7 +54,14 @@ const {
     sanitizePlainText,
     sanitizeWebhookSecret,
 } = require('../utils/security');
-const { getBillingAmount, activateProPlan, getPlanSummary } = require('../utils/billing');
+const {
+    getBillingAmount,
+    activateProPlan,
+    getPlanSummary,
+    getPlanCatalog,
+    hasProPlanAccess,
+    syncUserPlanState
+} = require('../utils/billing');
 const { getUserStorageSnapshot } = require('../utils/storage');
 const {
     hasMidtransConfig,
@@ -82,6 +90,26 @@ const MAX_OCR_BYTES = 10 * 1024 * 1024;
 const MAX_CONVERT_BYTES = 20 * 1024 * 1024;
 const MAX_EXTRACT_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_EXTRACTED_FILES = 250;
+const DEVELOPER_CENTER_ENDPOINTS = [
+    { method: 'GET', path: '/api/profile/api-keys', feature: 'api_keys', description: 'List masked API keys and current plan limit.' },
+    { method: 'POST', path: '/api/profile/api-key', feature: 'api_keys', description: 'Create a new API key for server-to-server usage.' },
+    { method: 'DELETE', path: '/api/profile/api-key/:keyId', feature: 'api_keys', description: 'Revoke an active API key immediately.' },
+    { method: 'GET', path: '/api/profile/webhook', feature: 'webhook', description: 'Fetch webhook config and recent delivery logs.' },
+    { method: 'POST', path: '/api/profile/webhook', feature: 'webhook', description: 'Save webhook endpoint and secret.' },
+    { method: 'POST', path: '/api/profile/webhook/test', feature: 'webhook', description: 'Send a test ping and inspect delivery result.' },
+    { method: 'POST', path: '/api/upload', feature: 'upload', description: 'Standard base64 upload for third-party integrations.' },
+    { method: 'POST', path: '/api/upload/remote', feature: 'remote_upload', description: 'Store a public URL directly into the workspace.' },
+    { method: 'POST', path: '/api/upload/chunk/init', feature: 'chunk_upload', description: 'Begin multipart upload session for large files.' },
+    { method: 'POST', path: '/api/upload/chunk/finalize', feature: 'chunk_upload', description: 'Finalize chunk upload into a stored file.' },
+    { method: 'PUT', path: '/api/files/:id/meta', feature: 'metadata', description: 'Update description and tags for a file.' },
+    { method: 'PUT', path: '/api/files/:id/visibility', feature: 'metadata', description: 'Set public/private visibility.' },
+    { method: 'GET', path: '/api/files/:id/analytics', feature: 'analytics', description: 'Fetch views/downloads by country.' },
+    { method: 'POST', path: '/api/files/:id/ocr', feature: 'ocr', description: 'Extract text from an image file.' },
+    { method: 'POST', path: '/api/files/:id/extract', feature: 'ai_extract', description: 'AI-assisted archive extract workflow.' },
+    { method: 'POST', path: '/api/billing/checkout', feature: 'billing', description: 'Create Midtrans checkout session.' },
+    { method: 'POST', path: '/api/billing/sync/:orderId', feature: 'billing', description: 'Manual sync for payment status after popup flow.' },
+    { method: 'POST', path: '/api/profile/branding', feature: 'branding', description: 'Save PRO branding logo, color, and title.' }
+];
 
 async function sendEmail(to, subject, htmlContent) {
     try {
@@ -525,6 +553,91 @@ async function permanentlyDeleteOwnedFiles(ownerId, rootIds = []) {
     return { deletedCount: tree.length };
 }
 
+async function setOwnedTreeDeletedAt(ownerId, rootIds = [], deletedAt) {
+    const tree = await getOwnedFileTree(ownerId, rootIds);
+    if (!tree.length) return { affectedCount: 0 };
+
+    await File.updateMany(
+        { _id: { $in: tree.map((file) => file._id) } },
+        { $set: { deletedAt } }
+    );
+
+    return { affectedCount: tree.length };
+}
+
+async function getDashboardSummaryForUser(userId, visibleFiles = []) {
+    const storage = await getUserStorageSnapshot(userId);
+    const [ownedFiles, ownedFolders, sharedItems] = await Promise.all([
+        File.countDocuments({ owner: userId, deletedAt: null, isFolder: false }),
+        File.countDocuments({ owner: userId, deletedAt: null, isFolder: true }),
+        File.countDocuments({ 'collaborators.user': userId, deletedAt: null })
+    ]);
+
+    return {
+        ownedFiles,
+        ownedFolders,
+        sharedItems,
+        totalDownloads: Array.isArray(visibleFiles) ? visibleFiles.reduce((sum, item) => sum + Number(item.downloads || 0), 0) : 0,
+        currentUsage: storage.used,
+        availableStorage: storage.available,
+        totalStorage: storage.total,
+        storagePercentage: storage.percentage,
+        fileCount: storage.fileCount
+    };
+}
+
+async function ensureUserCanStoreBytes(user, incomingBytes = 0) {
+    await syncUserPlanState(user);
+    const snapshot = await getUserStorageSnapshot(user._id);
+    const projectedUsage = snapshot.used + Math.max(0, Number(incomingBytes || 0));
+
+    if (snapshot.used > snapshot.total) {
+        return {
+            ok: false,
+            code: 409,
+            message: `Storage plan Anda sudah melebihi batas ${getPlanSummary(user.plan).name}. Hapus file dulu sebelum upload baru.`,
+            storage: snapshot
+        };
+    }
+
+    if (projectedUsage > snapshot.total) {
+        return {
+            ok: false,
+            code: 413,
+            message: `Upload diblok karena akan melewati batas storage ${getPlanSummary(user.plan).name}. Sisa storage Anda ${Math.max(0, snapshot.available)} byte.`,
+            storage: snapshot
+        };
+    }
+
+    return { ok: true, storage: snapshot };
+}
+
+function detectDeveloperAuthType(req) {
+    if (req.headers['x-api-key']) return 'api_key';
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) return 'bearer';
+    if (req.cookies?.token) return 'cookie';
+    return 'system';
+}
+
+async function logDeveloperRequest(req, feature, options = {}) {
+    if (!req?.user?._id || !feature) return;
+    try {
+        await DeveloperRequestLog.create({
+            user: req.user._id,
+            feature,
+            category: options.category || 'developer',
+            method: req.method,
+            path: req.originalUrl || req.path || '',
+            statusCode: Number(options.statusCode || 200),
+            authType: detectDeveloperAuthType(req),
+            bytes: Number(options.bytes || 0),
+            meta: options.meta || {}
+        });
+    } catch (error) {
+        console.error('Developer request log failed:', error.message);
+    }
+}
+
 async function getOptionalAuthenticatedUser(req) {
     let token = req.cookies.token;
 
@@ -691,6 +804,69 @@ router.get('/profile/storage', auth.protectApi, async (req, res) => {
     }
 });
 
+router.get('/dashboard/summary', auth.protectApi, async (req, res) => {
+    try {
+        const summary = await getDashboardSummaryForUser(req.user._id);
+        res.json({ stats: summary });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to load dashboard summary.' });
+    }
+});
+
+router.get('/developer/overview', auth.protectApi, async (req, res) => {
+    try {
+        const [storage, recentLogs, paidTransactions] = await Promise.all([
+            getUserStorageSnapshot(req.user._id),
+            DeveloperRequestLog.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(12).lean(),
+            PaymentTransaction.countDocuments({ user: req.user._id, status: 'paid' })
+        ]);
+
+        const featureCounts = recentLogs.reduce((acc, item) => {
+            acc[item.feature] = (acc[item.feature] || 0) + 1;
+            return acc;
+        }, {});
+
+        res.json({
+            plan: getPlanSummary(req.user.plan),
+            storage,
+            apiKeys: {
+                used: Array.isArray(req.user.apiKeys) ? req.user.apiKeys.length : 0,
+                limit: API_KEY_LIMITS[req.user.plan] || API_KEY_LIMITS.free
+            },
+            webhook: {
+                isActive: Boolean(req.user.webhook?.isActive),
+                url: req.user.webhook?.url || '',
+                deliveries: req.user.webhook?.deliveries || []
+            },
+            branding: {
+                available: hasProPlanAccess(req.user),
+                configured: Boolean(req.user.branding?.logoUrl || req.user.branding?.pageTitle || req.user.branding?.primaryColor)
+            },
+            payments: {
+                paidTransactions
+            },
+            logs: recentLogs,
+            featureCounts,
+            endpoints: DEVELOPER_CENTER_ENDPOINTS
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to load developer overview.' });
+    }
+});
+
+router.get('/developer/logs', auth.protectApi, async (req, res) => {
+    try {
+        const logs = await DeveloperRequestLog.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(40).lean();
+        res.json({ logs });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to load developer logs.' });
+    }
+});
+
+router.get('/developer/endpoints', auth.protectApi, async (req, res) => {
+    res.json({ endpoints: DEVELOPER_CENTER_ENDPOINTS });
+});
+
 router.post('/billing/checkout', auth.protectApi, async (req, res) => {
     try {
         if (!hasMidtransConfig()) {
@@ -749,6 +925,9 @@ router.post('/billing/checkout', auth.protectApi, async (req, res) => {
         });
 
         await transaction.save();
+        await logDeveloperRequest(req, 'billing', {
+            meta: { action: 'checkout', billingCycle, amount, selectedMethod, orderId }
+        });
 
         res.json({
             orderId,
@@ -786,6 +965,9 @@ router.post('/billing/sync/:orderId', auth.protectApi, async (req, res) => {
         });
         const refreshedUser = await User.findById(req.user.id).select('plan subscriptionExpiresAt');
         const storage = await getUserStorageSnapshot(req.user._id);
+        await logDeveloperRequest(req, 'billing', {
+            meta: { action: 'sync', orderId: transaction.orderId, status: transaction.status }
+        });
 
         res.json({
             status: transaction.status,
@@ -973,6 +1155,12 @@ router.post('/upload', async (req, res) => {
 
         const parsedPayload = parseDataUrl(base64);
         let buffer = parsedPayload.buffer;
+        if (user?._id) {
+            const quotaCheck = await ensureUserCanStoreBytes(user, buffer.length);
+            if (!quotaCheck.ok) {
+                return res.status(quotaCheck.code).json({ message: quotaCheck.message, storage: quotaCheck.storage });
+            }
+        }
         if (buffer.length > MAX_STANDARD_UPLOAD_BYTES) {
             return res.status(413).json({
                 message: 'Standard upload supports up to 20 MB. Use chunk upload for larger files.'
@@ -1063,6 +1251,11 @@ router.post('/upload', async (req, res) => {
                 url: `${req.protocol}://${req.get('host')}/w-upload/file/${newFile.customAlias}`,
                 uploadedAt: newFile.createdAt
             });
+            await logDeveloperRequest(req, 'upload', {
+                statusCode: 201,
+                bytes: newFile.size,
+                meta: { alias: newFile.customAlias, contentType: newFile.contentType }
+            });
         }
 
         res.status(201).json({
@@ -1093,6 +1286,10 @@ router.post('/upload/remote', auth.protectApi, async (req, res) => {
         if (buffer.length > MAX_REMOTE_UPLOAD_BYTES) {
             return res.status(413).json({ message: 'Remote file is too large.' });
         }
+        const quotaCheck = await ensureUserCanStoreBytes(req.user, buffer.length);
+        if (!quotaCheck.ok) {
+            return res.status(quotaCheck.code).json({ message: quotaCheck.message, storage: quotaCheck.storage });
+        }
         
         if (!validateMagicBytes(buffer, contentType)) {
             return res.status(400).json({ message: 'Remote file type validation failed.' });
@@ -1118,6 +1315,11 @@ router.post('/upload/remote', auth.protectApi, async (req, res) => {
         });
         await saveFileWithUniqueAlias(newFile, filename);
         await createUploadInsight(req.user, newFile, 'remote_upload');
+        await logDeveloperRequest(req, 'remote_upload', {
+            statusCode: 201,
+            bytes: newFile.size,
+            meta: { alias: newFile.customAlias, sourceUrl: safeUrl }
+        });
         res.status(201).json({ message: 'Remote upload success', file: newFile });
     } catch (error) {
         res.status(500).json({ message: 'Remote upload failed' });
@@ -1129,6 +1331,10 @@ router.post('/upload/chunk/init', auth.protectApi, async (req, res) => {
     const cleanName = sanitizeFilename(filename);
     if (Number(totalSize || 0) > MAX_CHUNK_SESSION_BYTES) {
         return res.status(413).json({ message: 'Chunk upload exceeds maximum allowed size.' });
+    }
+    const quotaCheck = await ensureUserCanStoreBytes(req.user, Number(totalSize || 0));
+    if (!quotaCheck.ok) {
+        return res.status(quotaCheck.code).json({ message: quotaCheck.message, storage: quotaCheck.storage });
     }
     const alias = await ensureUniqueAlias(`chunk_${Date.now()}_${cleanName}`, cleanName);
     const multipart = await r2.send(new CreateMultipartUploadCommand({
@@ -1148,6 +1354,9 @@ router.post('/upload/chunk/init', auth.protectApi, async (req, res) => {
         parts: []
     });
     await session.save();
+    await logDeveloperRequest(req, 'chunk_upload', {
+        meta: { phase: 'init', filename: cleanName, totalSize: Number(totalSize || 0) }
+    });
     res.json({ sessionId, chunkSize: MAX_CHUNK_SIZE_BYTES });
 });
 
@@ -1239,6 +1448,11 @@ router.post('/upload/chunk/finalize', auth.protectApi, async (req, res) => {
     await saveFileWithUniqueAlias(newFile, session.filename);
     await UploadSession.deleteOne({ _id: session._id });
     await createUploadInsight(req.user, newFile, 'chunk_upload');
+    await logDeveloperRequest(req, 'chunk_upload', {
+        statusCode: 201,
+        bytes: newFile.size,
+        meta: { phase: 'finalize', alias: newFile.customAlias }
+    });
     res.status(201).json({
         message: 'File assembled successfully',
         file: serializeDashboardFile(newFile),
@@ -1312,6 +1526,14 @@ router.put('/files/:id/meta', auth.protectApi, async (req, res) => {
         }
 
         await file.save();
+        await logDeveloperRequest(req, 'metadata', {
+            meta: {
+                fileId: String(file._id),
+                hasDescription: Boolean(file.description),
+                tagCount: Array.isArray(file.tags) ? file.tags.length : 0,
+                visibility: file.isHidden ? 'private' : 'public'
+            }
+        });
         res.json({
             message: 'Metadata updated.',
             file: {
@@ -1337,6 +1559,9 @@ router.put('/files/:id/protect', auth.protectApi, async (req, res) => {
         if (limit) file.downloadLimit = parseInt(limit, 10);
 
         await file.save();
+        await logDeveloperRequest(req, 'metadata', {
+            meta: { fileId: String(file._id), visibility: file.isHidden ? 'private' : 'public' }
+        });
         res.status(200).json({ message: 'Protection updated.' });
     } catch (error) {
         res.status(500).json({ message: 'Server error.' });
@@ -1349,12 +1574,14 @@ router.delete('/files/:id', auth.protectApi, async(req, res) => {
 
     if (file.deletedAt) {
         const result = await permanentlyDeleteOwnedFiles(req.user.id, [file._id]);
-        return res.json({ message: `Item deleted permanently (${result.deletedCount} item).` });
+        const stats = await getDashboardSummaryForUser(req.user._id);
+        return res.json({ message: `Item deleted permanently (${result.deletedCount} item).`, stats });
     }
 
-    file.deletedAt = new Date();
-    await file.save();
-    res.json({message:'File moved to trash'});
+    const deletedAt = new Date();
+    await setOwnedTreeDeletedAt(req.user.id, [file._id], deletedAt);
+    const stats = await getDashboardSummaryForUser(req.user._id);
+    res.json({ message:'File moved to trash', stats });
 });
 
 router.post('/files/bulk', auth.protectApi, async (req, res) => {
@@ -1369,18 +1596,19 @@ router.post('/files/bulk', auth.protectApi, async (req, res) => {
             const activeIds = files.filter((file) => !file.deletedAt).map((file) => file._id);
 
             if (activeIds.length) {
-                await File.updateMany({ _id: { $in: activeIds }, owner: req.user.id }, { deletedAt: new Date() });
+                await setOwnedTreeDeletedAt(req.user.id, activeIds, new Date());
             }
             if (trashedIds.length) {
                 await permanentlyDeleteOwnedFiles(req.user.id, trashedIds);
             }
         }
-        else if (action === 'restore') await File.updateMany(query, { deletedAt: null });
+        else if (action === 'restore') await setOwnedTreeDeletedAt(req.user.id, fileIds, null);
         else if (action === 'move') await File.updateMany(query, { parentId: targetFolderId || null });
         else if (action === 'star') await File.updateMany(query, { isStarred: true });
         else if (action === 'unstar') await File.updateMany(query, { isStarred: false });
-        
-        res.json({ message: 'Bulk action completed' });
+
+        const stats = await getDashboardSummaryForUser(req.user._id);
+        res.json({ message: 'Bulk action completed', stats });
     } catch (e) {
         res.status(500).json({ message: 'Bulk action failed' });
     }
@@ -1389,7 +1617,8 @@ router.post('/files/bulk', auth.protectApi, async (req, res) => {
 router.delete('/trash/empty', auth.protectApi, async (req, res) => {
     const trashedRoots = await File.find({ owner: req.user.id, deletedAt: { $ne: null } }).select('_id');
     const result = await permanentlyDeleteOwnedFiles(req.user.id, trashedRoots.map((file) => file._id));
-    res.json({ message: `Trash emptied permanently (${result.deletedCount} item).` });
+    const stats = await getDashboardSummaryForUser(req.user._id);
+    res.json({ message: `Trash emptied permanently (${result.deletedCount} item).`, stats });
 });
 
 router.post('/files/:id/collaborator', auth.protectApi, async (req, res) => {
@@ -1572,7 +1801,7 @@ router.post('/files/:alias/comment', auth.protectApi, async (req, res) => {
 });
 router.post('/profile/branding', auth.protectApi, async (req, res) => {
     const { logoUrl, logoBase64, primaryColor, pageTitle } = req.body;
-    if (req.user.plan !== 'pro') {
+    if (!hasProPlanAccess(req.user)) {
         return res.status(403).json({ message: 'Branding is a Pro feature.' });
     }
 
@@ -1597,6 +1826,9 @@ router.post('/profile/branding', auth.protectApi, async (req, res) => {
         pageTitle: sanitizePageTitle(pageTitle)
     };
     await req.user.save();
+    await logDeveloperRequest(req, 'branding', {
+        meta: { hasLogo: Boolean(finalLogoUrl), primaryColor: req.user.branding.primaryColor }
+    });
     res.json({ message: 'Branding settings updated.' });
 });
 
@@ -1685,7 +1917,9 @@ router.get('/files/:id/analytics', auth.protectApi, async (req, res) => {
         }},
         { $sort: { downloads: -1, views: -1 } }
     ]);
-    
+    await logDeveloperRequest(req, 'analytics', {
+        meta: { fileId: String(file._id), buckets: analytics.length }
+    });
     res.json(analytics);
 });
 router.post('/files/:alias/react', auth.protectApi, async (req, res) => {
@@ -1877,6 +2111,10 @@ router.post('/profile/api-key', auth.protectApi, async (req, res) => {
         label: sanitizePlainText(label || 'Unnamed Key', 40)
     });
     await req.user.save();
+    await logDeveloperRequest(req, 'api_keys', {
+        statusCode: 201,
+        meta: { action: 'create', used: req.user.apiKeys.length, limit: apiKeyLimit }
+    });
     
     res.status(201).json({
         message: 'API Key generated.',
@@ -1892,6 +2130,9 @@ router.delete('/profile/api-key/:keyId', auth.protectApi, async (req, res) => {
         { _id: req.user.id },
         { $pull: { apiKeys: { _id: req.params.keyId } } }
     );
+    await logDeveloperRequest(req, 'api_keys', {
+        meta: { action: 'delete', keyId: req.params.keyId }
+    });
     res.json({ message: 'API Key revoked.' });
 });
 
@@ -1902,7 +2143,18 @@ router.get('/profile/webhook', auth.protectApi, async (req, res) => {
         webhook: {
             url: req.user.webhook?.url || '',
             isActive: Boolean(req.user.webhook?.isActive),
-            secret: req.user.webhook?.secret ? 'configured' : ''
+            secret: req.user.webhook?.secret ? 'configured' : '',
+            deliveries: (req.user.webhook?.deliveries || []).map((entry) => ({
+                event: entry.event,
+                status: entry.status,
+                responseStatus: entry.responseStatus || 0,
+                retryCount: entry.retryCount || 0,
+                maxRetries: entry.maxRetries || 0,
+                endpoint: entry.endpoint || '',
+                error: entry.error || '',
+                deliveredAt: entry.deliveredAt || null,
+                lastAttemptAt: entry.lastAttemptAt || null
+            }))
         }
     });
 });
@@ -1926,19 +2178,52 @@ router.post('/profile/webhook', auth.protectApi, async (req, res) => {
     };
     
     await req.user.save();
+    await logDeveloperRequest(req, 'webhook', {
+        meta: { action: 'save', isActive: req.user.webhook.isActive, hasSecret: Boolean(req.user.webhook.secret) }
+    });
     res.json({
         message: 'Webhook configuration saved.',
         webhook: {
             url: req.user.webhook.url,
             isActive: req.user.webhook.isActive,
-            secret: req.user.webhook.secret ? 'configured' : ''
+            secret: req.user.webhook.secret ? 'configured' : '',
+            deliveries: (req.user.webhook?.deliveries || []).map((entry) => ({
+                event: entry.event,
+                status: entry.status,
+                responseStatus: entry.responseStatus || 0,
+                retryCount: entry.retryCount || 0,
+                maxRetries: entry.maxRetries || 0,
+                endpoint: entry.endpoint || '',
+                error: entry.error || '',
+                deliveredAt: entry.deliveredAt || null,
+                lastAttemptAt: entry.lastAttemptAt || null
+            }))
         }
     });
 });
 
 router.post('/profile/webhook/test', auth.protectApi, async (req, res) => {
-    triggerWebhook(req.user, 'test.ping', { message: 'This is a test webhook.' });
-    res.json({ message: 'Test webhook sent.' });
+    const result = await triggerWebhook(req.user, 'test.ping', { message: 'This is a test webhook.' });
+    await logDeveloperRequest(req, 'webhook', {
+        meta: { action: 'test', delivered: Boolean(result?.delivered), responseStatus: result?.responseStatus || 0 }
+    });
+    res.json({
+        message: result?.delivered ? 'Test webhook delivered.' : 'Test webhook attempted.',
+        delivery: result || null,
+        webhook: {
+            deliveries: (req.user.webhook?.deliveries || []).map((entry) => ({
+                event: entry.event,
+                status: entry.status,
+                responseStatus: entry.responseStatus || 0,
+                retryCount: entry.retryCount || 0,
+                maxRetries: entry.maxRetries || 0,
+                endpoint: entry.endpoint || '',
+                error: entry.error || '',
+                deliveredAt: entry.deliveredAt || null,
+                lastAttemptAt: entry.lastAttemptAt || null
+            }))
+        }
+    });
 });
 router.get('/profile/devices', auth.protectApi, async (req, res) => {
     const user = await User.findById(req.user.id);
@@ -2181,6 +2466,10 @@ router.post('/files/:id/ocr', auth.protectApi, async (req, res) => {
         const buffer = await getR2ObjectBuffer(file.r2Key);
 
         const { data: { text } } = await Tesseract.recognize(buffer, 'eng');
+        await logDeveloperRequest(req, 'ocr', {
+            bytes: Number(file.size || 0),
+            meta: { fileId: String(file._id), extractedChars: text.length }
+        });
         res.json({ text });
     } catch (error) {
         res.status(500).json({ message: 'OCR process failed.', error: error.message });
@@ -2377,6 +2666,10 @@ router.post('/files/:id/extract', auth.protectApi, async (req, res) => {
         }
 
         await createArchiveExtractInsight(user, file, extractedFiles);
+        await logDeveloperRequest(req, 'ai_extract', {
+            bytes: Number(file.size || 0),
+            meta: { fileId: String(file._id), extractedCount: extractedFiles.length }
+        });
 
         res.status(201).json({ 
             message: 'AI extract selesai di folder yang sama dengan arsip.',

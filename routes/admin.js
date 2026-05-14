@@ -7,6 +7,7 @@ const File = require('../models/file');
 const SystemConfig = require('../models/systemConfig');
 const PublicRequest = require('../models/publicRequest');
 const auth = require('../middleware/auth');
+const { applyPlanToUser, getPlanCatalog } = require('../utils/billing');
 
 router.use(auth.protectView, auth.protectAdmin);
 
@@ -77,16 +78,17 @@ router.post('/users/:id/update', async (req, res) => {
         } else if (action === 'bandwidth') {
             await User.findByIdAndUpdate(userId, { bandwidthLimit: parseInt(value) || 0 });
         } else if (action === 'plan') {
-            const plan = value; 
-            const update = { plan };
+            const user = await User.findById(userId);
+            if (!user) return res.status(404).send('User not found');
+
+            const plan = getPlanCatalog()[value] ? value : 'free';
+            applyPlanToUser(user, plan);
             if (plan === 'pro') {
-                update.storageLimit = 50 * 1024 * 1024 * 1024;
-                update.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                user.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
             } else {
-                update.storageLimit = 1073741824; 
-                update.subscriptionExpiresAt = null;
+                user.subscriptionExpiresAt = null;
             }
-            await User.findByIdAndUpdate(userId, update);
+            await user.save();
         }
         res.redirect('/admin');
     } catch (e) {
