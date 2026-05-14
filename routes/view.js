@@ -450,9 +450,6 @@ router.get('/w-upload/file/:identifier', auth.checkAuthStatus, async (req, res) 
             isLoggedIn: res.locals.isLoggedIn
         };
 
-        if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(fileExtension) && canEdit) {
-            return res.render('editor_image', renderOptions);
-        }
         if (fileExtension === '.pdf' && canEdit) {
             renderOptions.rawLink = downloadLink;
             return res.render('editor_pdf', renderOptions);

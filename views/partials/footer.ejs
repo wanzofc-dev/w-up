@@ -22,6 +22,12 @@
         lastErrorAt: 0
     };
     const disablePageTranslation = document.body?.dataset?.disableTranslation === 'true' || window.__disablePageTranslation === true;
+    const attributeDatasetKeyMap = {
+        placeholder: 'originalPlaceholder',
+        title: 'originalTitle',
+        'aria-label': 'originalAriaLabel',
+        value: 'originalValue'
+    };
 
     const translateableSelectors = 'input[placeholder], textarea[placeholder], [title], [aria-label], input[type="button"], input[type="submit"], option';
 
@@ -142,7 +148,7 @@
                 const currentValue = element.getAttribute(attr);
                 if (!shouldTranslateText(currentValue)) return;
 
-                const originalKey = `original${attr.charAt(0).toUpperCase()}${attr.slice(1)}`;
+                const originalKey = attributeDatasetKeyMap[attr];
                 if (!element.dataset[originalKey]) {
                     element.dataset[originalKey] = currentValue;
                 }
@@ -193,9 +199,15 @@
             throw new Error('Translation temporarily paused.');
         }
 
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrfToken) {
+            headers['X-CSRF-Token'] = csrfToken;
+        }
+
         const response = await fetch('/api/i18n/translate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 texts,
                 targetLang,

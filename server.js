@@ -70,6 +70,7 @@ app.use(helmet({
       styleSrc: [
         "'self'", 
         "'unsafe-inline'", 
+        "data:",
         "cdnjs.cloudflare.com", 
         "cdn.plyr.io", 
         "uicdn.toast.com",
