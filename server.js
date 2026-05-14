@@ -59,6 +59,7 @@ app.use(helmet({
         "cdnjs.cloudflare.com", 
         "cdn.plyr.io", 
         "cdn.jsdelivr.net", 
+        "uicdn.toast.com",
         "app.midtrans.com",
         "app.sandbox.midtrans.com",
         "pagead2.googlesyndication.com",
@@ -71,6 +72,7 @@ app.use(helmet({
         "'unsafe-inline'", 
         "cdnjs.cloudflare.com", 
         "cdn.plyr.io", 
+        "uicdn.toast.com",
         "fonts.googleapis.com"
       ],
       fontSrc: ["'self'", "cdnjs.cloudflare.com", "fonts.gstatic.com"],

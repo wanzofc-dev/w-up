@@ -18,6 +18,7 @@
         suspendObserver: false,
         observer: null
     };
+    const disablePageTranslation = document.body?.dataset?.disableTranslation === 'true' || window.__disablePageTranslation === true;
 
     const translateableSelectors = 'input[placeholder], textarea[placeholder], [title], [aria-label], input[type="button"], input[type="submit"], option';
 
@@ -181,6 +182,10 @@
     }
 
     async function requestTranslations(texts, targetLang) {
+        if (disablePageTranslation) {
+            return texts;
+        }
+
         const response = await fetch('/api/i18n/translate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -199,6 +204,10 @@
     }
 
     async function translateDocument(scope = document.body) {
+        if (disablePageTranslation) {
+            return;
+        }
+
         if (translationState.processing) return;
         if (translationState.language === 'original') {
             restoreOriginalLanguage(scope);
@@ -262,6 +271,12 @@
     function initializeLanguageSwitcher() {
         window.__originalDocumentTitle = document.title;
         if (!languageSwitcher) return;
+        if (disablePageTranslation) {
+            languageSwitcher.value = 'original';
+            languageSwitcher.disabled = true;
+            languageSwitcher.title = 'Translation disabled on this page';
+            return;
+        }
 
         const validCodes = new Set(['original', ...availableLanguages.map(language => language.code)]);
         if (!validCodes.has(translationState.language)) {

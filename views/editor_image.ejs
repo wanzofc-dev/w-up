@@ -5,6 +5,10 @@
     .tui-image-editor-container { margin: 20px auto; }
     .top-bar-controls { position:fixed; top:20px; right:20px; z-index:10; display:flex; gap:10px; }
 </style>
+<script>
+    document.body.dataset.disableTranslation = 'true';
+    window.__disablePageTranslation = true;
+</script>
 
 <div class="top-bar-controls">
     <button id="annotateBtn" class="btn secondary-btn">Add Note</button>
@@ -14,20 +18,45 @@
 
 <script src="https://uicdn.toast.com/tui-image-editor/latest/tui-image-editor.js"></script>
 <script>
-    const imageEditor = new tui.ImageEditor('#tui-image-editor-container', {
-        includeUI: {
-            loadImage: { path: '<%= downloadLink %>', name: '<%= file.originalName %>' },
-            theme: 'dark',
-            menu: ['crop', 'flip', 'rotate', 'draw', 'shape', 'icon', 'text', 'mask', 'filter'],
-            initMenu: 'filter',
-            uiSize: { width: '100%', height: 'calc(100vh - 50px)' },
-            menuBarPosition: 'bottom'
-        },
-        cssMaxWidth: 900,
-        cssMaxHeight: 700,
-    });
+    let imageEditor;
+
+    async function bootImageEditor() {
+        try {
+            const imageResponse = await fetch('<%= downloadLink %>', { credentials: 'same-origin' });
+            if (!imageResponse.ok) {
+                throw new Error(`Image request failed with status ${imageResponse.status}`);
+            }
+
+            const imageBlob = await imageResponse.blob();
+            const imageUrl = URL.createObjectURL(imageBlob);
+
+            imageEditor = new tui.ImageEditor('#tui-image-editor-container', {
+                includeUI: {
+                    loadImage: { path: imageUrl, name: '<%= file.originalName %>' },
+                    theme: 'dark',
+                    menu: ['crop', 'flip', 'rotate', 'draw', 'shape', 'icon', 'text', 'mask', 'filter'],
+                    initMenu: 'filter',
+                    uiSize: { width: '100%', height: 'calc(100vh - 50px)' },
+                    menuBarPosition: 'bottom'
+                },
+                cssMaxWidth: 900,
+                cssMaxHeight: 700,
+            });
+        } catch (error) {
+            console.error('Image editor failed to load:', error);
+            if (window.showToast) {
+                window.showToast('Image editor failed to load.', 'error');
+            }
+        }
+    }
+
+    bootImageEditor();
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
+        if (!imageEditor) {
+            if (window.showToast) window.showToast('Editor is not ready yet.', 'warning');
+            return;
+        }
         const base64 = imageEditor.toDataURL();
         const res = await fetch('/api/files/<%= file._id %>/save-version', {
             method: 'POST',
@@ -38,6 +67,10 @@
     });
     
     document.getElementById('annotateBtn').addEventListener('click', async () => {
+        if (!imageEditor) {
+            if (window.showToast) window.showToast('Editor is not ready yet.', 'warning');
+            return;
+        }
         const text = prompt("Enter your annotation/comment:");
         if (!text) return;
         const data = { text, x: 100, y: 100 };
