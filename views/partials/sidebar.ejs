@@ -49,6 +49,7 @@
         <% 
             const totalLimit = (user.storageLimit || 0) + (user.storageBonus || 0);
             const used = user.storageUsed || 0;
+            const available = Math.max(0, totalLimit - used);
             const percentage = totalLimit > 0 ? Math.min(100, (used / totalLimit) * 100) : 0;
         %>
         <div class="storage-label-row">
@@ -60,8 +61,10 @@
         </div>
         <small id="storageMeta"
             data-storage-used="<%= used %>"
-            data-storage-total="<%= totalLimit %>">
+            data-storage-total="<%= totalLimit %>"
+            data-storage-available="<%= available %>">
             <%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB
         </small>
+        <small id="storageAvailableLabel">Tersedia <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB</small>
     </div>
 </aside>

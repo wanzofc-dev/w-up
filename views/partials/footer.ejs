@@ -76,6 +76,12 @@
         const storageMeta = document.getElementById('storageMeta');
         const storageFill = document.getElementById('storageFill');
         const storagePercent = document.getElementById('storagePercent');
+        const storageAvailableLabel = document.getElementById('storageAvailableLabel');
+        const heroStorageUsage = document.getElementById('heroStorageUsage');
+        const heroStorageAvailable = document.getElementById('heroStorageAvailable');
+        const statStorageDetail = document.getElementById('statStorageDetail');
+        const heroStorageFill = document.getElementById('heroStorageFill');
+        const statStorageUsed = document.getElementById('statStorageUsed');
         if (!storageMeta || !storageFill || !storagePercent) return;
 
         try {
@@ -88,6 +94,25 @@
             storageMeta.textContent = `${formatStorageGigabytes(data.used)} / ${formatStorageGigabytes(data.total)}`;
             storageMeta.dataset.storageUsed = data.used;
             storageMeta.dataset.storageTotal = data.total;
+            storageMeta.dataset.storageAvailable = data.available;
+            if (storageAvailableLabel) {
+                storageAvailableLabel.textContent = `Tersedia ${formatStorageGigabytes(data.available)}`;
+            }
+            if (heroStorageUsage) {
+                heroStorageUsage.textContent = `${formatStorageGigabytes(data.used)} / ${formatStorageGigabytes(data.total)}`;
+            }
+            if (heroStorageAvailable) {
+                heroStorageAvailable.textContent = `Sisa ${formatStorageGigabytes(data.available)}`;
+            }
+            if (heroStorageFill) {
+                heroStorageFill.style.width = `${data.percentage || 0}%`;
+            }
+            if (statStorageUsed) {
+                statStorageUsed.textContent = formatStorageGigabytes(data.used);
+            }
+            if (statStorageDetail) {
+                statStorageDetail.textContent = `${formatStorageGigabytes(data.used)} / ${formatStorageGigabytes(data.total)} tersinkron. Tersedia ${formatStorageGigabytes(data.available)}.`;
+            }
         } catch (error) {}
     }
 

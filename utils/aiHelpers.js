@@ -2,13 +2,30 @@ const mongoose = require('mongoose');
 const User = require('../models/user');
 const File = require('../models/file');
 const Team = require('../models/team');
+const AiLog = require('../models/aiLog');
+const AiInsight = require('../models/aiInsight');
+const FileRequest = require('../models/fileRequest');
+const LinkVisit = require('../models/linkVisit');
+const PaymentTransaction = require('../models/paymentTransaction');
+const PublicRequest = require('../models/publicRequest');
+const SystemConfig = require('../models/systemConfig');
+const UploadSession = require('../models/uploadSession');
+const { getUserStorageSnapshot } = require('../utils/storage');
 
 const readOnlyConn = mongoose.createConnection(process.env.MONGO_URI);
 
 const AI_SCHEMA_MAP = {
-    User: "username, email, role, plan, storageUsed, storageLimit, isVerified, createdAt",
-    File: "originalName, size, contentType, downloads, virusScan, createdAt",
-    Team: "name, members, storageQuota, usedStorage"
+    User: 'username, email, role, plan, storageUsed, storageLimit, storageBonus, isVerified, sessions, failedLogins, createdAt',
+    File: 'originalName, size, contentType, downloads, virusScan, isHidden, password, tags, deletedAt, createdAt',
+    Team: 'name, members, storageQuota, usedStorage, createdAt',
+    AiInsight: 'kind, title, summary, severity, metadata, deliveredAt, createdAt',
+    AiLog: 'query, response, feedback, ip, timestamp',
+    FileRequest: 'slug, label, destinationFolder, expiresAt, createdAt',
+    LinkVisit: 'file, shareLinkId, ip, userAgent, geo, type, timestamp',
+    PaymentTransaction: 'orderId, billingCycle, amount, status, paymentMethod, paidAt, createdAt',
+    PublicRequest: 'requestType, contactEmail, details, status, createdAt',
+    SystemConfig: 'maintenanceMode, globalAnnouncement, adsEnabled, updatedAt',
+    UploadSession: 'filename, contentType, totalSize, uploadedSize, createdAt'
 };
 
 const privacyFilter = (data) => {
@@ -25,12 +42,127 @@ const getUserProfile = async (userId) => {
 
 const getStorageStats = async (userId) => {
     const user = await User.findById(userId);
-    const count = await File.countDocuments({ owner: userId, deletedAt: null });
+    const storage = await getUserStorageSnapshot(userId);
     return {
-        files: count,
-        used: (user.storageUsed / 1024 / 1024).toFixed(2) + ' MB',
-        limit: (user.storageLimit / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+        files: storage.fileCount,
+        used: (storage.used / 1024 / 1024).toFixed(2) + ' MB',
+        limit: (storage.total / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+        available: (storage.available / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+        percentage: storage.percentage.toFixed(1) + '%',
         plan: user.plan
+    };
+};
+
+const getWorkspaceIntelligence = async (userId) => {
+    const user = await User.findById(userId).select('-password -twoFactorSecret -apiKeys');
+    if (!user) return null;
+
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+        storage,
+        fileCounts,
+        requestCounts,
+        totalVisits,
+        recentInsights,
+        recentAiLogs,
+        paymentSummary,
+        uploadSessions,
+        systemConfig
+    ] = await Promise.all([
+        getUserStorageSnapshot(userId),
+        Promise.all([
+            File.countDocuments({ owner: userId, deletedAt: null, isFolder: false }),
+            File.countDocuments({ owner: userId, deletedAt: null, isFolder: true }),
+            File.countDocuments({ owner: userId, deletedAt: { $ne: null } }),
+            File.countDocuments({ owner: userId, deletedAt: null, isHidden: false, password: { $in: [null, ''] } }),
+            File.countDocuments({ owner: userId, deletedAt: null, 'virusScan.status': 'infected' }),
+            File.countDocuments({
+                owner: userId,
+                deletedAt: null,
+                $or: [
+                    { virusScan: { $exists: false } },
+                    { 'virusScan.status': { $in: ['unscanned', null] } }
+                ]
+            })
+        ]),
+        Promise.all([
+            FileRequest.countDocuments({ owner: userId }),
+            PublicRequest.countDocuments({ status: { $in: ['Pending', 'In Progress'] } })
+        ]),
+        LinkVisit.aggregate([
+            {
+                $lookup: {
+                    from: 'files',
+                    localField: 'file',
+                    foreignField: '_id',
+                    as: 'fileDoc'
+                }
+            },
+            { $unwind: '$fileDoc' },
+            {
+                $match: {
+                    timestamp: { $gte: weekAgo },
+                    'fileDoc.owner': user._id
+                }
+            },
+            { $count: 'total' }
+        ]),
+        AiInsight.find({ user: userId }).sort({ createdAt: -1 }).limit(3).lean(),
+        AiLog.find({ user: userId }).sort({ timestamp: -1 }).limit(3).lean(),
+        Promise.all([
+            PaymentTransaction.countDocuments({ user: userId, status: 'paid' }),
+            PaymentTransaction.countDocuments({ user: userId, status: 'pending' })
+        ]),
+        UploadSession.find({ owner: userId }).sort({ createdAt: -1 }).limit(5).lean(),
+        SystemConfig.getConfig()
+    ]);
+
+    const [ownedFiles, ownedFolders, trashedFiles, publicUnprotectedFiles, infectedFiles, unscannedFiles] = fileCounts;
+    const [fileRequestCount, openPublicRequests] = requestCounts;
+    const [paidTransactions, pendingTransactions] = paymentSummary;
+    const ownedVisitCount = Number(totalVisits?.[0]?.total || 0);
+
+    return {
+        collections: {
+            aiinsights: await AiInsight.countDocuments({ user: userId }),
+            ailogs: await AiLog.countDocuments({ user: userId }),
+            filerequests: fileRequestCount,
+            files: ownedFiles,
+            folders: ownedFolders,
+            trashedFiles,
+            linkvisits7d: ownedVisitCount,
+            paymenttransactions: paidTransactions + pendingTransactions,
+            publicrequestsOpen: openPublicRequests,
+            systemconfigs: systemConfig ? 1 : 0,
+            teams: Array.isArray(user.teams) ? user.teams.length : 0,
+            uploadsessionsActive: uploadSessions.length,
+            usersVisibleToAssistant: 1
+        },
+        storage,
+        recentInsights: recentInsights.map(item => ({
+            title: item.title,
+            severity: item.severity,
+            summary: item.summary
+        })),
+        recentAiLogs: recentAiLogs.map(item => ({
+            query: item.query,
+            feedback: item.feedback,
+            timestamp: item.timestamp
+        })),
+        security: {
+            failedLoginAttempts24h: (user.failedLogins || []).filter(item => item.date && item.date >= dayAgo).length,
+            activeSessions: Array.isArray(user.sessions) ? user.sessions.length : 0,
+            publicUnprotectedFiles,
+            infectedFiles,
+            unscannedFiles,
+            maintenanceMode: Boolean(systemConfig?.maintenanceMode),
+            adsEnabled: Boolean(systemConfig?.adsEnabled),
+            webhookEnabled: Boolean(user.webhook?.isActive),
+            twoFactorEnabled: Boolean(user.isTwoFactorEnabled),
+            verifiedAccount: Boolean(user.isVerified)
+        }
     };
 };
 
@@ -71,6 +203,7 @@ module.exports = {
     privacyFilter,
     getUserProfile,
     getStorageStats,
+    getWorkspaceIntelligence,
     searchUsers,
     getTeamData,
     getActivityLog

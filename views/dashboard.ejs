@@ -41,8 +41,13 @@
         
         <div class="storage-info">
             <% 
-                const totalLimit = user.storageLimit + (user.storageBonus || 0);
-                const used = user.storageUsed || 0;
+                const totalLimit = dashboardStats && dashboardStats.totalStorage !== undefined
+                    ? dashboardStats.totalStorage
+                    : user.storageLimit + (user.storageBonus || 0);
+                const used = dashboardStats && dashboardStats.currentUsage !== undefined
+                    ? dashboardStats.currentUsage
+                    : (user.storageUsed || 0);
+                const available = Math.max(0, totalLimit - used);
                 const percentage = totalLimit > 0 ? Math.min(100, (used / totalLimit) * 100) : 0;
             %>
             <div class="storage-label-row">
@@ -50,9 +55,10 @@
                 <strong id="storagePercent"><%= percentage.toFixed(1) %>%</strong>
             </div>
             <div class="progress-bar"><div class="fill" id="storageFill" style="width: <%= percentage %>%;"></div></div>
-            <small id="storageMeta" data-storage-used="<%= used %>" data-storage-total="<%= totalLimit %>">
+            <small id="storageMeta" data-storage-used="<%= used %>" data-storage-total="<%= totalLimit %>" data-storage-available="<%= available %>">
                 <%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB
             </small>
+            <small id="storageAvailableLabel">Tersedia <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB</small>
         </div>
     </aside>
 
@@ -105,6 +111,7 @@
                     <div>
                         <small>Storage capacity</small>
                         <strong id="heroStorageUsage"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> GB / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB</strong>
+                        <span id="heroStorageAvailable">Sisa <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB</span>
                     </div>
                     <div class="hero-storage-rail">
                         <div class="hero-storage-fill" id="heroStorageFill" style="width: <%= percentage %>%;"></div>
@@ -130,7 +137,7 @@
                 <article class="hero-stat-card">
                     <small>Storage used</small>
                     <strong id="statStorageUsed" data-bytes="<%= dashboardStats ? dashboardStats.currentUsage : 0 %>"><%= dashboardStats ? (dashboardStats.currentUsage / 1024 / 1024 / 1024).toFixed(2) : '0.00' %> GB</strong>
-                    <span id="statStorageDetail"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB tersinkron.</span>
+                    <span id="statStorageDetail"><%= (used / 1024 / 1024 / 1024).toFixed(2) %> / <%= (totalLimit / 1024 / 1024 / 1024).toFixed(2) %> GB tersinkron. Tersedia <%= (available / 1024 / 1024 / 1024).toFixed(2) %> GB.</span>
                 </article>
                 <article class="hero-stat-card">
                     <small>Total downloads</small>
@@ -720,14 +727,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateDashboardStatsUi() {
         const used = Number(dashboardState.stats.currentUsage || 0);
         const total = Number(dashboardState.storage.total || 0);
+        const available = Math.max(0, total - used);
         const percentage = total > 0 ? Math.min(100, (used / total) * 100) : 0;
         document.getElementById('statOwnedFiles').textContent = dashboardState.stats.ownedFiles;
         document.getElementById('statOwnedFolders').textContent = dashboardState.stats.ownedFolders;
         document.getElementById('statSharedItems').textContent = dashboardState.stats.sharedItems;
         document.getElementById('statDownloads').textContent = dashboardState.stats.totalDownloads;
         document.getElementById('statStorageUsed').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB`;
-        document.getElementById('statStorageDetail').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB tersinkron.`;
+        document.getElementById('statStorageDetail').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB tersinkron. Tersedia ${(available / 1024 / 1024 / 1024).toFixed(2)} GB.`;
         document.getElementById('heroStorageUsage').textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        document.getElementById('heroStorageAvailable').textContent = `Sisa ${(available / 1024 / 1024 / 1024).toFixed(2)} GB`;
         document.getElementById('heroStorageFill').style.width = `${percentage}%`;
 
         const storageFill = document.getElementById('storageFill');
@@ -739,6 +748,11 @@ document.addEventListener('DOMContentLoaded', () => {
             storageMeta.textContent = `${(used / 1024 / 1024 / 1024).toFixed(2)} GB / ${(total / 1024 / 1024 / 1024).toFixed(2)} GB`;
             storageMeta.dataset.storageUsed = String(used);
             storageMeta.dataset.storageTotal = String(total);
+            storageMeta.dataset.storageAvailable = String(available);
+            const storageAvailableLabel = document.getElementById('storageAvailableLabel');
+            if (storageAvailableLabel) {
+                storageAvailableLabel.textContent = `Tersedia ${(available / 1024 / 1024 / 1024).toFixed(2)} GB`;
+            }
         }
     }
 

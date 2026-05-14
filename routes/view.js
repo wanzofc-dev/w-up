@@ -10,6 +10,7 @@ const Team = require('../models/team');
 const LinkVisit = require('../models/linkVisit');
 const FileRequest = require('../models/fileRequest');
 const PaymentTransaction = require('../models/paymentTransaction');
+const { getUserStorageSnapshot } = require('../utils/storage');
 const auth = require('../middleware/auth');
 const { r2, GetObjectCommand, DeleteObjectCommand, getR2BucketName } = require('../utils/r2');
 const { getBillingPricing } = require('../utils/billing');
@@ -342,13 +343,9 @@ router.get('/dashboard', auth.protectView, async (req, res) => {
 
         const files = await File.find(query).sort(sort).select('-base64 -versions.base64');
         
-        const stats = await File.aggregate([
-            { $match: { owner: req.user._id, deletedAt: null } },
-            { $group: { _id: null, totalSize: { $sum: "$size" } } }
-        ]);
-        const currentUsage = stats.length > 0 ? stats[0].totalSize : 0;
+        const storage = await getUserStorageSnapshot(req.user._id);
+        const currentUsage = storage.used;
         req.user.storageUsed = currentUsage;
-        await req.user.save();
 
         const [ownedFiles, ownedFolders, sharedItems] = await Promise.all([
             File.countDocuments({ owner: req.user.id, deletedAt: null, isFolder: false }),
@@ -361,7 +358,9 @@ router.get('/dashboard', auth.protectView, async (req, res) => {
             ownedFolders,
             sharedItems,
             totalDownloads: files.reduce((sum, item) => sum + (item.downloads || 0), 0),
-            currentUsage
+            currentUsage,
+            availableStorage: storage.available,
+            totalStorage: storage.total
         };
 
         res.render('dashboard', { files, query: req.query, currentFolder, breadcrumbs, dashboardStats });

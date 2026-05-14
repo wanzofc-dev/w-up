@@ -13,8 +13,10 @@ const { translateText } = require('../utils/tr');
 const { getDocsContent } = require('../utils/docsLoader');
 const { r2, GetObjectCommand } = require('../utils/r2');
 const auth = require('../middleware/auth');
-const { getUserProfile, getStorageStats, searchUsers, getTeamData, getActivityLog, AI_SCHEMA_MAP } = require('../utils/aiHelpers');
+const { aiSecurityGuard } = require('../middleware/aiSecurity');
+const { getUserProfile, getStorageStats, getWorkspaceIntelligence, searchUsers, getTeamData, getActivityLog, AI_SCHEMA_MAP } = require('../utils/aiHelpers');
 const { formatFileResults, parseDateRange, searchFileContent, findSimilarFilesByName } = require('../utils/aiSearchHelpers');
+const { isOpenRouterEnabled, requestOpenRouterReply } = require('../utils/openrouterClient');
 
 function maskPII(text) {
     return text.replace(/\b[\w.-]+@[\w.-]+\.\w{2,4}\b/g, '[EMAIL PROTECTED]').replace(/\b(\+62|0)[0-9]{9,12}\b/g, '[PHONE PROTECTED]');
@@ -38,9 +40,9 @@ function formatInsightMarkdown(insight) {
     ].filter(Boolean).join('\n\n');
 }
 
-router.post('/chat', auth.protectApi, async (req, res) => {
+router.post('/chat', auth.protectApi, aiSecurityGuard, async (req, res) => {
     try {
-        const { message, context } = req.body;
+        const { message, context, history } = req.body;
         const userId = req.user.id;
         const userTeams = req.user.teams || [];
         const userRole = req.user.role;
@@ -51,6 +53,7 @@ router.post('/chat', auth.protectApi, async (req, res) => {
         let responseText = "";
         let action = null;
         let match;
+        let usedOpenRouterReply = false;
 
         // --- NEW Regex-based command parsing ---
 
@@ -393,10 +396,63 @@ router.post('/chat', auth.protectApi, async (req, res) => {
         else if (cleanMsg.startsWith('read file')) { const f = await File.findOne({ owner: userId, originalName: { $regex: cleanMsg.replace('read file', '').trim(), $options: 'i' } }); responseText = f ? `**${f.originalName}**:\n${(await extractContent(f)).substring(0, 500)}...` : 'File not found.'; }
         else if (cleanMsg.startsWith('summarize')) { const f = await File.findOne({ owner: userId, originalName: { $regex: cleanMsg.replace('summarize', '').trim(), $options: 'i' } }); responseText = f ? `**Summary:**\n${summarizeText(await extractContent(f))}` : 'File not found.'; }
         else if (cleanMsg.includes('go to')) { action = { type: 'navigate', url: cleanMsg.includes('settings') ? '/profile' : '/dashboard' }; responseText = "Navigating..."; }
-        else if (cleanMsg.includes('help')) { responseText = `**Available Actions:**\n- Rename/Move/Delete file\n- Create folder\n- Share file\n- Empty trash\n- Find/Search files`; }
-        else { responseText = `I'm sorry, I don't understand that command. Try "help" for a list of actions.`; }
+        else if (cleanMsg.includes('help')) { responseText = `**Available Actions:**\n- Rename/Move/Delete file\n- Create folder\n- Share file\n- Empty trash\n- Find/Search files\n- Ask natural questions about your workspace`; }
+        else {
+            if (isOpenRouterEnabled()) {
+                try {
+                    const [storageStats, recentFiles, workspaceIntel] = await Promise.all([
+                        getStorageStats(userId),
+                        File.find({ owner: userId, deletedAt: null })
+                            .sort({ createdAt: -1 })
+                            .limit(5)
+                            .select('originalName contentType size createdAt isFolder')
+                            .lean(),
+                        getWorkspaceIntelligence(userId)
+                    ]);
 
-        const finalResponse = await translateText(responseText, userLang, 'en');
+                    const openRouterReply = await requestOpenRouterReply({
+                        message,
+                        history,
+                        user: req.user,
+                        context,
+                        storageStats,
+                        recentFiles,
+                        workspaceIntel,
+                        schemaMap: AI_SCHEMA_MAP
+                    });
+
+                    if (openRouterReply?.response) {
+                        responseText = openRouterReply.response;
+                        action = openRouterReply.action || null;
+                        usedOpenRouterReply = true;
+
+                        const finalResponse = maskPII(responseText);
+                        const log = new AiLog({ user: userId, query: message, response: finalResponse, ip: req.ip });
+                        await log.save();
+
+                        return res.json({
+                            response: finalResponse,
+                            action,
+                            logId: log._id,
+                            provider: 'openrouter',
+                            model: openRouterReply.model,
+                            usage: openRouterReply.usage,
+                            assistantMessage: openRouterReply.assistantMessage
+                        });
+                    }
+                } catch (codexError) {
+                    console.error('OpenRouter Web AI Error:', codexError.message);
+                }
+            }
+
+            if (!responseText) {
+                responseText = `I'm sorry, I don't understand that command. Try "help" for a list of actions.`;
+            }
+        }
+
+        const finalResponse = usedOpenRouterReply
+            ? responseText
+            : await translateText(responseText, userLang, 'en');
         const maskedResponse = maskPII(finalResponse);
 
         const log = new AiLog({ user: userId, query: message, response: maskedResponse, ip: req.ip });

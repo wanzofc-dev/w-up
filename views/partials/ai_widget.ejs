@@ -100,11 +100,15 @@
         const aiStatusBadge = document.getElementById('aiStatusBadge');
         let unseenInsights = 0;
         let lastInsightPollAt = 0;
+        let conversationHistory = [];
 
         // NEW, EXPANDED COMMAND LIST
         const newCommands = [
             "Who am I?",
             "Storage Usage",
+            "Ringkas AI insights terbaru saya",
+            "Cek posture keamanan akun saya",
+            "Apa risiko cyber paling penting di workspace saya?",
             "Show my most downloaded files",
             "Summarize [filename]",
             "Find documents that mention 'report'",
@@ -175,6 +179,16 @@
             }
             msgs.appendChild(div);
             msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
+        };
+
+        const pushHistoryMessage = (message) => {
+            if (!message || typeof message !== 'object') return;
+            if (typeof message.content !== 'string' || !message.content.trim()) return;
+
+            conversationHistory.push(message);
+            if (conversationHistory.length > 10) {
+                conversationHistory = conversationHistory.slice(-10);
+            }
         };
 
         const updateInsightBadge = () => {
@@ -250,6 +264,7 @@
             }
             
             addMsg(text, 'user');
+            pushHistoryMessage({ role: 'user', content: text });
             input.value = '';
             typing.classList.remove('hidden');
             msgs.scrollTop = msgs.scrollHeight;
@@ -258,12 +273,28 @@
                 const res = await fetch('/api/ai/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, context: getContext() })
+                    body: JSON.stringify({
+                        message: text,
+                        context: getContext(),
+                        history: conversationHistory
+                    })
                 });
                 
                 const data = await res.json();
                 typing.classList.add('hidden');
                 addMsg(data.response, 'bot', data.logId);
+
+                if (data.assistantMessage && typeof data.assistantMessage.content === 'string') {
+                    pushHistoryMessage({
+                        role: 'assistant',
+                        content: data.assistantMessage.content,
+                        reasoning_details: Array.isArray(data.assistantMessage.reasoning_details)
+                            ? data.assistantMessage.reasoning_details
+                            : []
+                    });
+                } else {
+                    pushHistoryMessage({ role: 'assistant', content: data.response });
+                }
 
                 if (data.action) {
                     if (data.action.type === 'navigate') {
