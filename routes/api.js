@@ -176,6 +176,8 @@ function serializeDashboardFile(file) {
         isFolder: Boolean(file.isFolder),
         isStarred: Boolean(file.isStarred),
         downloads: Number(file.downloads || 0),
+        description: file.description || '',
+        tags: Array.isArray(file.tags) ? file.tags : [],
         parentId: file.parentId ? String(file.parentId) : null,
         createdAt: file.createdAt
     };
@@ -1130,12 +1132,13 @@ router.put('/files/:id/visibility', auth.protectApi, async (req, res) => {
             return res.status(404).json({ message: 'File not found.' });
         }
 
-        file.isHidden = !!req.body.isHidden;
+        file.isHidden = isTruthy(req.body.isHidden);
         await file.save();
 
         res.json({
             message: file.isHidden ? 'File set to private.' : 'File set to public.',
-            isHidden: file.isHidden
+            isHidden: file.isHidden,
+            file: serializeDashboardFile(file)
         });
     } catch (error) {
         res.status(500).json({ message: 'Failed to update file visibility.' });
@@ -1145,12 +1148,32 @@ router.put('/files/:id/visibility', auth.protectApi, async (req, res) => {
 router.put('/files/:id/meta', auth.protectApi, async (req, res) => {
     try {
         const { description, tags, isHidden } = req.body;
-        const update = {};
-        if (description !== undefined) update.description = description;
-        if (tags !== undefined) update.tags = tags.split(',').map(t => sanitizeFilename(t.trim()));
-        if (isHidden !== undefined) update.isHidden = isHidden;
-        await File.findOneAndUpdate({ _id: req.params.id, owner: req.user.id }, update);
-        res.json({ message: 'Metadata updated' });
+        const file = await File.findOne({ _id: req.params.id, owner: req.user.id });
+        if (!file) {
+            return res.status(404).json({ message: 'File not found.' });
+        }
+
+        if (description !== undefined) {
+            file.description = sanitizePlainText(String(description), 2000);
+        }
+
+        if (tags !== undefined) {
+            file.tags = sanitizeTagList(tags);
+        }
+
+        if (isHidden !== undefined) {
+            file.isHidden = isTruthy(isHidden);
+        }
+
+        await file.save();
+        res.json({
+            message: 'Metadata updated.',
+            file: {
+                ...serializeDashboardFile(file),
+                description: file.description || '',
+                tags: file.tags || []
+            }
+        });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
 });
 

@@ -205,9 +205,47 @@ const getActivityLog = async (userId) => {
     ).join('\n');
 };
 
+const getSecuritySeverity = (security) => {
+    if (!security) {
+        return { level: 'unknown', label: 'UNKNOWN', summary: 'Data keamanan belum lengkap.' };
+    }
+
+    if (
+        security.infectedFiles > 0 ||
+        security.failedLoginAttempts24h >= 5 ||
+        (security.publicUnprotectedFiles > 0 && !security.twoFactorEnabled)
+    ) {
+        return {
+            level: 'critical',
+            label: 'CRITICAL',
+            summary: 'Ada risiko tinggi yang perlu ditangani segera sebelum file atau akun disalahgunakan.'
+        };
+    }
+
+    if (
+        security.publicUnprotectedFiles > 0 ||
+        security.unscannedFiles > 0 ||
+        !security.twoFactorEnabled ||
+        security.activeSessions > 3
+    ) {
+        return {
+            level: 'warning',
+            label: 'WARNING',
+            summary: 'Ada beberapa titik lemah yang belum darurat, tetapi cukup penting untuk segera dirapikan.'
+        };
+    }
+
+    return {
+        level: 'safe',
+        label: 'SAFE',
+        summary: 'Tidak ada indikator risiko besar yang menonjol saat ini.'
+    };
+};
+
 const formatWorkspaceSecurityReport = (intel) => {
     if (!intel) return 'Data keamanan workspace belum tersedia.';
 
+    const severity = getSecuritySeverity(intel.security);
     const risks = [];
     if (intel.security.failedLoginAttempts24h > 0) risks.push(`Terdapat **${intel.security.failedLoginAttempts24h}** percobaan login gagal dalam 24 jam terakhir.`);
     if (intel.security.unscannedFiles > 0) risks.push(`Ada **${intel.security.unscannedFiles}** file yang belum discan malware.`);
@@ -216,18 +254,30 @@ const formatWorkspaceSecurityReport = (intel) => {
     if (!intel.security.twoFactorEnabled) risks.push('2FA belum aktif untuk akun ini.');
     if (intel.security.activeSessions > 3) risks.push(`Sesi aktif cukup banyak: **${intel.security.activeSessions}** device/session.`);
 
-    const fallback = 'Tidak ada indikator kritis yang menonjol saat ini, tetapi tetap disarankan scan file rutin dan aktifkan 2FA.';
+    const fallback = 'Tidak ada indikator kritis yang menonjol saat ini, tetapi tetap disarankan scan file rutin dan audit akses publik secara berkala.';
     const recommendations = [
+        intel.security.infectedFiles > 0 ? 'Isolasi atau hapus file yang terdeteksi infected sebelum dibagikan lagi.' : null,
+        intel.security.failedLoginAttempts24h > 0 ? 'Review percobaan login gagal dan ganti password jika ada aktivitas yang tidak dikenal.' : null,
         intel.security.unscannedFiles > 0 ? 'Jalankan scan pada file yang belum diperiksa.' : null,
         intel.security.publicUnprotectedFiles > 0 ? 'Lindungi file publik sensitif dengan password atau ubah ke private.' : null,
         !intel.security.twoFactorEnabled ? 'Aktifkan 2FA di halaman profile.' : null,
-        intel.security.activeSessions > 3 ? 'Audit session aktif dan logout device yang tidak dikenal.' : null
+        intel.security.activeSessions > 3 ? 'Audit session aktif dan logout device yang tidak dikenal.' : null,
+        intel.security.verifiedAccount ? null : 'Verifikasi akun agar pemulihan dan notifikasi keamanan lebih kuat.'
     ].filter(Boolean);
 
     return [
-        '**Posture keamanan akun**',
+        `**Security Posture: ${severity.label}**`,
+        severity.summary,
+        `- File publik tanpa password: **${intel.security.publicUnprotectedFiles}**`,
+        `- File belum discan: **${intel.security.unscannedFiles}**`,
+        `- File terinfeksi: **${intel.security.infectedFiles}**`,
+        `- Percobaan login gagal 24 jam: **${intel.security.failedLoginAttempts24h}**`,
+        `- Sesi aktif: **${intel.security.activeSessions}**`,
+        `- 2FA: **${intel.security.twoFactorEnabled ? 'Enabled' : 'Disabled'}**`,
+        `- Akun terverifikasi: **${intel.security.verifiedAccount ? 'Yes' : 'No'}**`,
+        '\n**Temuan utama**',
         risks.length ? risks.map(item => `- ${item}`).join('\n') : fallback,
-        recommendations.length ? `\n**Langkah perbaikan**\n${recommendations.map(item => `- ${item}`).join('\n')}` : ''
+        recommendations.length ? `\n**Checklist tindakan langsung**\n${recommendations.map(item => `- [ ] ${item}`).join('\n')}` : '\n**Checklist tindakan langsung**\n- [ ] Tidak ada tindakan mendesak saat ini. Lanjutkan monitoring rutin.'
     ].join('\n\n');
 };
 
@@ -250,7 +300,7 @@ const formatWorkspaceRiskSummary = (intel) => {
         return 'Risiko cyber paling penting saat ini adalah **2FA belum aktif**. Jika cookie atau password bocor, akun lebih mudah diambil alih. Prioritas: aktifkan 2FA di halaman profile.';
     }
 
-    return 'Risiko cyber utama saat ini tergolong rendah. Tetap pantau upload baru, session aktif, dan file publik secara berkala.';
+    return 'Risiko cyber utama saat ini tergolong rendah. Status keseluruhan berada di level **SAFE**, tetapi tetap pantau upload baru, session aktif, dan file publik secara berkala.';
 };
 
 module.exports = {
@@ -261,6 +311,7 @@ module.exports = {
     getStorageStats,
     getWorkspaceIntelligence,
     formatStorageAmount,
+    getSecuritySeverity,
     formatWorkspaceSecurityReport,
     formatWorkspaceRiskSummary,
     searchUsers,

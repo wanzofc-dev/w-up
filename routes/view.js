@@ -404,9 +404,12 @@ router.get('/w-upload/file/:identifier', auth.checkAuthStatus, async (req, res) 
         let activeShareLink = null;
         if (shareId) {
             const link = file.shareLinks.find(link => link.linkId === shareId);
-            if (!link) return res.status(403).send('This share link is invalid or has been revoked.');
-            if (link.expiresAt && link.expiresAt < new Date()) return res.status(410).send('This share link has expired.');
-            activeShareLink = link;
+            if (link) {
+                if (link.expiresAt && link.expiresAt < new Date()) return res.status(410).send('This share link has expired.');
+                activeShareLink = link;
+            } else if (file.isHidden) {
+                return res.status(403).send('This share link is invalid or has been revoked.');
+            }
         }
 
         if (file.isHidden && !hasOwnerAccess && !hasCollaboratorAccess && !activeShareLink) {
@@ -431,9 +434,9 @@ router.get('/w-upload/file/:identifier', auth.checkAuthStatus, async (req, res) 
 
         if (file.password) {
             const token = req.cookies[`file_access_${file._id}`];
-            if (!token) return res.render('password_prompt', { file, hint: file.passwordHint, totalViews });
+            if (!token) return res.render('password_prompt', { file, hint: file.passwordHint, totalViews, shareId });
             try { jwt.verify(token, process.env.JWT_SECRET); } 
-            catch (e) { return res.render('password_prompt', { file, hint: file.passwordHint, error: 'Session expired.', totalViews }); }
+            catch (e) { return res.render('password_prompt', { file, hint: file.passwordHint, error: 'Session expired.', totalViews, shareId }); }
         }
         
         const downloadLink = file.isFolder ? `/api/files/${file._id}/zip` : `/w-upload/raw/${file.customAlias}${shareId ? '?share_id='+shareId : ''}`;
@@ -474,15 +477,17 @@ router.get('/w-upload/file/:identifier', auth.checkAuthStatus, async (req, res) 
 });
 router.post('/w-upload/file/:identifier/auth', async (req, res) => {
     const file = await File.findOne({ customAlias: req.params.identifier }).select('-base64');
-    if (!file || !file.password) return res.redirect(`/w-upload/file/${req.params.identifier}`);
+    const shareId = String(req.body.share_id || '').trim();
+    const shareSuffix = shareId ? `?share_id=${encodeURIComponent(shareId)}` : '';
+    if (!file || !file.password) return res.redirect(`/w-upload/file/${req.params.identifier}${shareSuffix}`);
     
     const isMatch = await bcrypt.compare(req.body.password, file.password);
     if (isMatch) {
         const token = jwt.sign({ fileId: file._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
         res.cookie(`file_access_${file._id}`, token, { httpOnly: true, maxAge: 3600000 });
-        res.redirect(`/w-upload/file/${req.params.identifier}`);
+        res.redirect(`/w-upload/file/${req.params.identifier}${shareSuffix}`);
     } else {
-        res.render('password_prompt', { file, hint: file.passwordHint, error: 'Invalid password' });
+        res.render('password_prompt', { file, hint: file.passwordHint, error: 'Invalid password', shareId });
     }
 });
 
@@ -500,9 +505,12 @@ router.get('/w-upload/raw/:identifier', auth.checkAuthStatus, async (req, res) =
         let activeShareLink = null;
         if (shareId) {
             const link = file.shareLinks.find(link => link.linkId === shareId);
-            if (!link) return res.status(403).send('This share link is invalid or has been revoked.');
-            if (link.expiresAt && link.expiresAt < new Date()) return res.status(410).send('This share link has expired.');
-            activeShareLink = link;
+            if (link) {
+                if (link.expiresAt && link.expiresAt < new Date()) return res.status(410).send('This share link has expired.');
+                activeShareLink = link;
+            } else if (file.isHidden) {
+                return res.status(403).send('This share link is invalid or has been revoked.');
+            }
         }
 
         if (file.isHidden && !hasOwnerAccess && !hasCollaboratorAccess && !activeShareLink) {

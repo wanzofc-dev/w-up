@@ -208,6 +208,8 @@
                      data-type="<%= file.isFolder ? 'folder' : 'file' %>"
                      data-content-type="<%= file.contentType %>"
                      data-is-hidden="<%= file.isHidden ? 'true' : 'false' %>"
+                     data-description="<%- (file.description || '').replace(/"/g, '&quot;') %>"
+                     data-tags="<%- (file.tags || []).join(', ').replace(/"/g, '&quot;') %>"
                      data-size="<%= file.size || 0 %>"
                      data-created-at="<%= file.createdAt ? file.createdAt.toISOString() : '' %>"
                      data-ext="<%= ext %>"
@@ -704,6 +706,8 @@ document.addEventListener('DOMContentLoaded', () => {
                  data-type="${file.isFolder ? 'folder' : 'file'}"
                  data-content-type="${escapeHtml(file.contentType || 'application/octet-stream')}"
                  data-is-hidden="${file.isHidden ? 'true' : 'false'}"
+                 data-description="${escapeHtml(file.description || '')}"
+                 data-tags="${escapeHtml(Array.isArray(file.tags) ? file.tags.join(', ') : '')}"
                  data-size="${Number(file.size || 0)}"
                  data-created-at="${escapeHtml(file.createdAt || '')}"
                  data-ext="${escapeHtml(ext)}"
@@ -1189,6 +1193,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if(btn) btn.addEventListener('click', (e) => {
             e.preventDefault();
             contextMenu.style.display = 'none';
+            if (modalId === 'metaModal' && contextTarget) {
+                document.getElementById('descInput').value = contextTarget.dataset.description || '';
+                document.getElementById('tagsInput').value = contextTarget.dataset.tags || '';
+            }
             document.getElementById(modalId).classList.add('active');
         });
     });
@@ -1199,14 +1207,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             if (res.ok) {
                 showToast(data.message || 'Action completed!', 'success');
-                return true;
+                return data;
             } else {
                 showToast(data.message || 'An error occurred.', 'error');
-                return false;
+                return null;
             }
         } catch (error) {
             showToast('Network error.', 'error');
-            return false;
+            return null;
         }
     }
 
@@ -1236,13 +1244,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('cmVisibility').addEventListener('click', async () => {
         if (!contextTarget) return;
         const nextState = contextTarget.dataset.isHidden !== 'true';
-        const success = await performAction(`/api/files/${contextTarget.dataset.id}/visibility`, 'PUT', { isHidden: nextState });
-        if (success) {
-            contextTarget.dataset.isHidden = nextState ? 'true' : 'false';
+        const result = await performAction(`/api/files/${contextTarget.dataset.id}/visibility`, 'PUT', { isHidden: nextState });
+        if (result?.file) {
+            contextTarget.dataset.isHidden = result.file.isHidden ? 'true' : 'false';
             const badge = contextTarget.querySelector('.file-visibility-badge');
             if (badge) {
-                badge.textContent = nextState ? 'Private' : 'Public';
-                badge.className = `file-visibility-badge ${nextState ? 'private' : 'public'}`;
+                badge.textContent = result.file.isHidden ? 'Private' : 'Public';
+                badge.className = `file-visibility-badge ${result.file.isHidden ? 'private' : 'public'}`;
             }
             updateVisibilityUi();
         }
@@ -1266,8 +1274,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('saveMetaBtn').addEventListener('click', async () => {
+        if (!contextTarget) return;
         const body = { description: document.getElementById('descInput').value, tags: document.getElementById('tagsInput').value };
-        if (await performAction(`/api/files/${contextTarget.dataset.id}/meta`, 'PUT', body)) location.reload();
+        const result = await performAction(`/api/files/${contextTarget.dataset.id}/meta`, 'PUT', body);
+        if (result?.file) {
+            contextTarget.dataset.description = result.file.description || '';
+            contextTarget.dataset.tags = Array.isArray(result.file.tags) ? result.file.tags.join(', ') : '';
+            document.getElementById('metaModal').classList.remove('active');
+            location.reload();
+        }
     });
 
     document.getElementById('cmStar').addEventListener('click', async () => {
@@ -1334,13 +1349,13 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleVisibilityBtn?.addEventListener('click', async () => {
         if (!contextTarget) return;
         const nextState = contextTarget.dataset.isHidden !== 'true';
-        const success = await performAction(`/api/files/${contextTarget.dataset.id}/visibility`, 'PUT', { isHidden: nextState });
-        if (success) {
-            contextTarget.dataset.isHidden = nextState ? 'true' : 'false';
+        const result = await performAction(`/api/files/${contextTarget.dataset.id}/visibility`, 'PUT', { isHidden: nextState });
+        if (result?.file) {
+            contextTarget.dataset.isHidden = result.file.isHidden ? 'true' : 'false';
             const badge = contextTarget.querySelector('.file-visibility-badge');
             if (badge) {
-                badge.textContent = nextState ? 'Private' : 'Public';
-                badge.className = `file-visibility-badge ${nextState ? 'private' : 'public'}`;
+                badge.textContent = result.file.isHidden ? 'Private' : 'Public';
+                badge.className = `file-visibility-badge ${result.file.isHidden ? 'private' : 'public'}`;
             }
             updateVisibilityUi();
         }
