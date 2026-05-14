@@ -427,6 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const billingStorageAvailableLabel = document.getElementById('billingStorageAvailableLabel');
     const billingSummaryNote = document.getElementById('billingSummaryNote');
     const billingHistoryList = document.getElementById('billingHistoryList');
+    const navPlanBadge = document.getElementById('navPlanBadge');
     const payNowBtn = document.getElementById('payNowBtn');
 
     let selectedCycle = 'monthly';
@@ -522,6 +523,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (billingCurrentPlanLabel) billingCurrentPlanLabel.textContent = currentPlan.toUpperCase();
         if (billingExpiryLabel) billingExpiryLabel.textContent = formatDate(syncData.expiresAt);
         if (summaryCurrentPlan) summaryCurrentPlan.textContent = currentPlan;
+        if (navPlanBadge && syncData.plan === 'pro') {
+            navPlanBadge.innerHTML = '<i class=\"fa-solid fa-crown\"></i> PRO Member';
+        }
 
         if (syncData.storage) {
             if (billingStorageUsageLabel) {

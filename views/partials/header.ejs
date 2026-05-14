@@ -58,13 +58,13 @@
                             <span class="nav-account-avatar"><%= user.username.slice(0, 1).toUpperCase() %></span>
                             <div class="nav-account-meta">
                                 <strong><%= user.username %></strong>
-                                <small>
+                                <small id="navPlanLabel">
                                     <% if (user.plan === 'pro') { %>
-                                        <i class="fa-solid fa-crown"></i> PRO Member
+                                        <span id="navPlanBadge"><i class="fa-solid fa-crown"></i> PRO Member</span>
                                     <% } else { %>
-                                        <i class="fa-solid fa-seedling"></i> Free Plan
+                                        <span id="navPlanBadge"><i class="fa-solid fa-seedling"></i> Free Plan</span>
                                     <% } %>
-                                    <% if (user.isVerified) { %> | <i class="fa-solid fa-circle-check"></i> Verified <% } %>
+                                    <% if (user.isVerified) { %> <span id="navVerifiedLabel">| <i class="fa-solid fa-circle-check"></i> Verified</span> <% } %>
                                 </small>
                             </div>
                         </div>
