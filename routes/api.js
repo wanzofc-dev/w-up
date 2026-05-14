@@ -35,6 +35,14 @@ const {
 } = require('../utils/passkey');
 const { translateBatch, languages } = require('../utils/tr');
 const { triggerWebhook } = require('../utils/webhook');
+const {
+    assertSafeOutboundUrl,
+    getApiKeyPrefix,
+    hashApiKey,
+    sanitizePageTitle,
+    sanitizePlainText,
+    sanitizeWebhookSecret,
+} = require('../utils/security');
 const { getBillingAmount, activateProPlan } = require('../utils/billing');
 const {
     hasMidtransConfig,
@@ -54,6 +62,14 @@ const API_KEY_LIMITS = {
     free: 3,
     pro: 25
 };
+const MAX_REMOTE_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_CHUNK_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_CHUNK_SESSION_BYTES = 50 * 1024 * 1024;
+const MAX_INLINE_IMAGE_ASSET_BYTES = 5 * 1024 * 1024;
+const MAX_OCR_BYTES = 10 * 1024 * 1024;
+const MAX_CONVERT_BYTES = 20 * 1024 * 1024;
+const MAX_EXTRACT_ARCHIVE_BYTES = 50 * 1024 * 1024;
+const MAX_EXTRACTED_FILES = 250;
 
 async function sendEmail(to, subject, htmlContent) {
     try {
@@ -137,6 +153,87 @@ function sanitizeTagList(tags) {
         .filter(Boolean);
 }
 
+function isFileOwner(file, userId) {
+    return Boolean(file?.owner && userId && file.owner.equals && file.owner.equals(userId));
+}
+
+function getCollaboratorRole(file, userId) {
+    if (!file?.collaborators || !userId) return null;
+    const collaborator = file.collaborators.find(entry => entry.user && entry.user.equals(userId));
+    return collaborator?.role || null;
+}
+
+function canUserAccessFile(file, user, options = {}) {
+    if (!file || file.deletedAt) return false;
+
+    const {
+        requireOwner = false,
+        allowedCollaboratorRoles = [],
+        allowPublic = false
+    } = options;
+
+    if (!user?._id) {
+        return allowPublic && !file.isHidden;
+    }
+
+    if (isFileOwner(file, user._id)) return true;
+    if (requireOwner) return false;
+
+    const collaboratorRole = getCollaboratorRole(file, user._id);
+    if (collaboratorRole) {
+        return allowedCollaboratorRoles.length === 0 || allowedCollaboratorRoles.includes(collaboratorRole);
+    }
+
+    return allowPublic && !file.isHidden;
+}
+
+async function loadAccessibleFileById(fileId, user, options = {}) {
+    const file = await File.findById(fileId);
+    if (!file || !canUserAccessFile(file, user, options)) {
+        return null;
+    }
+    return file;
+}
+
+async function findUserByApiKey(token) {
+    if (!token) return null;
+
+    const keyHash = hashApiKey(token);
+    let user = await User.findOne({ 'apiKeys.keyHash': keyHash }).select('-password');
+    if (user) {
+        const entry = user.apiKeys.find(item => item.keyHash === keyHash);
+        if (entry) {
+            entry.lastUsed = new Date();
+            await user.save();
+        }
+        return user;
+    }
+
+    user = await User.findOne({ 'apiKeys.key': token }).select('-password');
+    if (!user) return null;
+
+    const legacyEntry = user.apiKeys.find(item => item.key === token);
+    if (legacyEntry) {
+        legacyEntry.keyHash = keyHash;
+        legacyEntry.keyPrefix = legacyEntry.keyPrefix || getApiKeyPrefix(token);
+        legacyEntry.key = undefined;
+        legacyEntry.lastUsed = new Date();
+        await user.save();
+    }
+
+    return user;
+}
+
+function maskApiKeys(apiKeys = []) {
+    return apiKeys.map(key => ({
+        _id: key._id,
+        label: key.label,
+        keyPrefix: key.keyPrefix || '',
+        lastUsed: key.lastUsed || null,
+        createdAt: key.createdAt || null
+    }));
+}
+
 function streamToBuffer(stream) {
     if (!stream) return Promise.resolve(Buffer.alloc(0));
     if (Buffer.isBuffer(stream)) return Promise.resolve(stream);
@@ -170,6 +267,27 @@ async function uploadBufferToR2(ownerId, alias, buffer, contentType) {
         ContentType: contentType
     }));
     return r2Key;
+}
+
+async function storeUserImageAsset(ownerId, dataUrl, aliasBase) {
+    const parsed = parseDataUrl(dataUrl);
+    if (!parsed.contentType.startsWith('image/')) {
+        throw new Error('Only image assets are supported.');
+    }
+    if (parsed.buffer.length > MAX_INLINE_IMAGE_ASSET_BYTES) {
+        throw new Error('Image asset is too large.');
+    }
+
+    const extensionMap = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+        'image/gif': '.gif'
+    };
+    const extension = extensionMap[parsed.contentType] || '.bin';
+    const alias = normalizeAlias(`${aliasBase}${extension}`, aliasBase);
+    const r2Key = await uploadBufferToR2(ownerId, alias, parsed.buffer, parsed.contentType);
+    return { r2Key };
 }
 
 async function ensureUniqueAlias(candidate, fallbackName = 'file') {
@@ -299,7 +417,7 @@ async function getOptionalAuthenticatedUser(req) {
     } catch (e) {}
 
     try {
-        const user = await User.findOne({ 'apiKeys.key': token }).select('-password');
+        const user = await findUserByApiKey(token);
         if (user && !user.isBanned) {
             return user;
         }
@@ -686,6 +804,9 @@ router.post('/upload', async (req, res) => {
 
         const parsedPayload = parseDataUrl(base64);
         let buffer = parsedPayload.buffer;
+        if (buffer.length > MAX_CHUNK_SESSION_BYTES) {
+            return res.status(413).json({ message: 'Upload exceeds maximum allowed size.' });
+        }
 
         if (!validateMagicBytes(buffer, finalContentType)) {
             return res.status(400).json({ message: 'File rejected due to security policy.' });
@@ -781,9 +902,19 @@ router.post('/upload', async (req, res) => {
 router.post('/upload/remote', auth.protectApi, async (req, res) => {
     try {
         const { url, parentId } = req.body;
-        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        const safeUrl = await assertSafeOutboundUrl(url);
+        const response = await axios.get(safeUrl, {
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            maxRedirects: 0,
+            maxContentLength: MAX_REMOTE_UPLOAD_BYTES,
+            maxBodyLength: MAX_REMOTE_UPLOAD_BYTES
+        });
         const contentType = response.headers['content-type'] || 'application/octet-stream';
         const buffer = Buffer.from(response.data, 'binary');
+        if (buffer.length > MAX_REMOTE_UPLOAD_BYTES) {
+            return res.status(413).json({ message: 'Remote file is too large.' });
+        }
         
         if (!validateMagicBytes(buffer, contentType)) {
             return res.status(400).json({ message: 'Remote file type validation failed.' });
@@ -818,6 +949,9 @@ router.post('/upload/remote', auth.protectApi, async (req, res) => {
 router.post('/upload/chunk/init', auth.protectApi, async (req, res) => {
     const { filename, totalSize, contentType } = req.body;
     const cleanName = sanitizeFilename(filename);
+    if (Number(totalSize || 0) > MAX_CHUNK_SESSION_BYTES) {
+        return res.status(413).json({ message: 'Chunk upload exceeds maximum allowed size.' });
+    }
     const sessionId = crypto.randomBytes(16).toString('hex');
     const session = new UploadSession({
         sessionId,
@@ -834,8 +968,21 @@ router.post('/upload/chunk', auth.protectApi, async (req, res) => {
     const { sessionId, chunkIndex, base64Chunk } = req.body;
     const session = await UploadSession.findOne({ sessionId, owner: req.user.id });
     if (!session) return res.status(404).json({ message: 'Session not found' });
+    if (typeof base64Chunk !== 'string' || base64Chunk.length === 0) {
+        return res.status(400).json({ message: 'Chunk payload is required.' });
+    }
+
+    const payloadSize = Buffer.byteLength(base64Chunk, 'utf8');
+    if (payloadSize > MAX_CHUNK_SIZE_BYTES * 2) {
+        return res.status(413).json({ message: 'Chunk payload is too large.' });
+    }
     
     session.chunks.push({ index: chunkIndex, data: base64Chunk });
+    session.uploadedSize = (session.uploadedSize || 0) + payloadSize;
+    if (session.uploadedSize > MAX_CHUNK_SESSION_BYTES * 2) {
+        await UploadSession.deleteOne({ _id: session._id });
+        return res.status(413).json({ message: 'Chunk upload exceeds maximum allowed size.' });
+    }
     await session.save();
     res.json({ message: 'Chunk received' });
 });
@@ -1149,14 +1296,24 @@ router.post('/profile/branding', auth.protectApi, async (req, res) => {
     }
 
     let finalLogoUrl = typeof logoUrl === 'string' ? logoUrl.trim() : '';
+    let logoR2Key = req.user.branding?.logoR2Key || '';
     if (typeof logoBase64 === 'string' && logoBase64.startsWith('data:image/')) {
-        finalLogoUrl = logoBase64;
+        try {
+            const storedLogo = await storeUserImageAsset(req.user.id, logoBase64, 'branding_logo');
+            logoR2Key = storedLogo.r2Key;
+            finalLogoUrl = `/media/user/${req.user.id}/branding-logo?v=${Date.now()}`;
+        } catch (error) {
+            return res.status(413).json({ message: error.message });
+        }
     }
 
     req.user.branding = {
         logoUrl: finalLogoUrl,
-        primaryColor: primaryColor,
-        pageTitle: pageTitle
+        logoR2Key,
+        primaryColor: typeof primaryColor === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(primaryColor.trim())
+            ? primaryColor.trim()
+            : '#4F46E5',
+        pageTitle: sanitizePageTitle(pageTitle)
     };
     await req.user.save();
     res.json({ message: 'Branding settings updated.' });
@@ -1224,12 +1381,10 @@ router.post('/files/:id/request-signature', auth.protectApi, async (req, res) =>
 
 router.post('/files/:id/annotations', auth.protectApi, async (req, res) => {
     const { type, data } = req.body;
-    const file = await File.findById(req.params.id);
+    const file = await loadAccessibleFileById(req.params.id, req.user, {
+        allowedCollaboratorRoles: ['editor']
+    });
     if (!file) return res.status(404).json({ message: 'File not found' });
-
-    const hasAccess = file.owner.equals(req.user.id) || 
-                      file.collaborators.some(c => c.user.equals(req.user.id) && c.role === 'editor');
-    if (!hasAccess) return res.status(403).json({ message: 'Permission denied.' });
 
     file.annotations.push({ type, data, createdBy: req.user.id });
     await file.save();
@@ -1364,15 +1519,27 @@ router.put('/profile/settings', auth.protectApi, async (req, res) => {
     }
 
     req.user.isPublicProfile = isPublicProfile;
-    req.user.publicBio = publicBio;
+    req.user.publicBio = sanitizePlainText(publicBio, 500);
     req.user.email = normalizedEmail || '';
     req.user.publicTitle = normalizedTitle;
     req.user.publicThemeColor = normalizedThemeColor;
     if (typeof profilePhotoBase64 === 'string' && profilePhotoBase64.startsWith('data:image/')) {
-        req.user.profilePhotoUrl = profilePhotoBase64;
+        try {
+            const storedProfilePhoto = await storeUserImageAsset(req.user.id, profilePhotoBase64, 'profile_photo');
+            req.user.profilePhotoR2Key = storedProfilePhoto.r2Key;
+            req.user.profilePhotoUrl = `/media/user/${req.user.id}/profile-photo?v=${Date.now()}`;
+        } catch (error) {
+            return res.status(413).json({ message: error.message });
+        }
     }
     if (typeof publicCoverBase64 === 'string' && publicCoverBase64.startsWith('data:image/')) {
-        req.user.publicCoverUrl = publicCoverBase64;
+        try {
+            const storedPublicCover = await storeUserImageAsset(req.user.id, publicCoverBase64, 'public_cover');
+            req.user.publicCoverR2Key = storedPublicCover.r2Key;
+            req.user.publicCoverUrl = `/media/user/${req.user.id}/public-cover?v=${Date.now()}`;
+        } catch (error) {
+            return res.status(413).json({ message: error.message });
+        }
     }
     await req.user.save();
     res.json({
@@ -1409,7 +1576,7 @@ router.post('/profile/2fa/verify', auth.protectApi, async (req, res) => {
 
 router.get('/profile/api-keys', auth.protectApi, async (req, res) => {
     const apiKeyLimit = API_KEY_LIMITS[req.user.plan] || API_KEY_LIMITS.free;
-    res.json({ keys: req.user.apiKeys, limit: apiKeyLimit });
+    res.json({ keys: maskApiKeys(req.user.apiKeys), limit: apiKeyLimit });
 });
 
 router.post('/profile/api-key', auth.protectApi, async (req, res) => {
@@ -1423,13 +1590,17 @@ router.post('/profile/api-key', auth.protectApi, async (req, res) => {
     }
     const key = `wu_${crypto.randomBytes(24).toString('hex')}`;
     
-    req.user.apiKeys.push({ key, label: label || 'Unnamed Key' });
+    req.user.apiKeys.push({
+        keyHash: hashApiKey(key),
+        keyPrefix: getApiKeyPrefix(key),
+        label: sanitizePlainText(label || 'Unnamed Key', 40)
+    });
     await req.user.save();
     
     res.status(201).json({
         message: 'API Key generated.',
         key,
-        label,
+        label: sanitizePlainText(label || 'Unnamed Key', 40),
         limit: apiKeyLimit,
         used: req.user.apiKeys.length
     });
@@ -1446,20 +1617,42 @@ router.delete('/profile/api-key/:keyId', auth.protectApi, async (req, res) => {
 // --- Routes Management Webhook ---
 
 router.get('/profile/webhook', auth.protectApi, async (req, res) => {
-    res.json({ webhook: req.user.webhook });
+    res.json({
+        webhook: {
+            url: req.user.webhook?.url || '',
+            isActive: Boolean(req.user.webhook?.isActive),
+            secret: req.user.webhook?.secret ? 'configured' : ''
+        }
+    });
 });
 
 router.post('/profile/webhook', auth.protectApi, async (req, res) => {
     const { url, secret, isActive } = req.body;
+    let safeUrl = '';
+
+    if (typeof url === 'string' && url.trim()) {
+        try {
+            safeUrl = await assertSafeOutboundUrl(url);
+        } catch (error) {
+            return res.status(400).json({ message: error.message });
+        }
+    }
     
     req.user.webhook = {
-        url,
-        secret: secret || req.user.webhook.secret,
+        url: safeUrl,
+        secret: secret ? sanitizeWebhookSecret(secret) : req.user.webhook.secret,
         isActive: isActive === undefined ? true : isActive
     };
     
     await req.user.save();
-    res.json({ message: 'Webhook configuration saved.', webhook: req.user.webhook });
+    res.json({
+        message: 'Webhook configuration saved.',
+        webhook: {
+            url: req.user.webhook.url,
+            isActive: req.user.webhook.isActive,
+            secret: req.user.webhook.secret ? 'configured' : ''
+        }
+    });
 });
 
 router.post('/profile/webhook/test', auth.protectApi, async (req, res) => {
@@ -1490,7 +1683,9 @@ router.delete('/profile/devices', auth.protectApi, async (req, res) => {
 
 router.post('/files/:id/import', auth.protectApi, async (req, res) => {
     try {
-        const originalFile = await File.findOne({ _id: req.params.id });
+        const originalFile = await loadAccessibleFileById(req.params.id, req.user, {
+            allowedCollaboratorRoles: ['viewer', 'uploader', 'editor']
+        });
         if (!originalFile || originalFile.deletedAt) return res.status(404).json({ message: 'File not found' });
 
         const newAlias = await ensureUniqueAlias(
@@ -1532,9 +1727,11 @@ router.get('/files/:alias/qrcode', async (req, res) => {
     }
 });
 
-router.post('/files/:id/scan', async (req, res) => {
+router.post('/files/:id/scan', auth.protectApi, async (req, res) => {
     try {
-        const file = await File.findById(req.params.id);
+        const file = await loadAccessibleFileById(req.params.id, req.user, {
+            allowedCollaboratorRoles: ['viewer', 'uploader', 'editor']
+        });
         if (!file) return res.status(404).json({ message: 'File not found' });
         if (!file.virusScan) {
             file.virusScan = { status: 'unscanned' };
@@ -1687,12 +1884,17 @@ router.post('/auth/passkey/verify-login', async (req, res) => {
 
 router.post('/files/:id/ocr', auth.protectApi, async (req, res) => {
     try {
-        const file = await File.findById(req.params.id);
+        const file = await loadAccessibleFileById(req.params.id, req.user, {
+            allowedCollaboratorRoles: ['editor']
+        });
         if (!file || !file.contentType.startsWith('image/')) {
             return res.status(404).json({ message: 'Image file not found.' });
         }
         if (file.storageType !== 'r2' || !file.r2Key) {
             return res.status(400).json({ message: 'File is not stored in a processable location.' });
+        }
+        if (Number(file.size || 0) > MAX_OCR_BYTES) {
+            return res.status(413).json({ message: 'Image is too large for inline OCR processing.' });
         }
 
         const buffer = await getR2ObjectBuffer(file.r2Key);
@@ -1708,9 +1910,14 @@ router.post('/files/:id/ocr', auth.protectApi, async (req, res) => {
 router.post('/files/:id/convert', auth.protectApi, async (req, res) => {
     const { toFormat } = req.body; // e.g., 'pdf', 'jpg'
     try {
-        const file = await File.findById(req.params.id);
+        const file = await loadAccessibleFileById(req.params.id, req.user, {
+            allowedCollaboratorRoles: ['editor']
+        });
         if (!file) return res.status(404).json({ message: 'File not found.' });
         if (file.storageType !== 'r2') return res.status(400).json({ message: 'File not processable.' });
+        if (Number(file.size || 0) > MAX_CONVERT_BYTES) {
+            return res.status(413).json({ message: 'File is too large for inline conversion.' });
+        }
         const targetFormat = String(toFormat || '').toLowerCase();
         const inputBuffer = await getR2ObjectBuffer(file.r2Key);
 
@@ -1770,22 +1977,17 @@ router.post('/files/:id/convert', auth.protectApi, async (req, res) => {
 
 // Endpoint untuk mengekstrak arsip
 // Endpoint untuk mengekstrak arsip (SEKARANG PUBLIK)
-router.post('/files/:id/extract', async (req, res) => {
+router.post('/files/:id/extract', auth.protectApi, async (req, res) => {
     try {
-        // Cek otentikasi secara opsional
-        let user = null;
-        if (req.cookies.token) {
-            try {
-                const decoded = jwt.verify(req.cookies.token, process.env.JWT_SECRET);
-                user = await User.findById(decoded.id);
-            } catch (e) {
-                // Abaikan jika token tidak valid, lanjutkan sebagai tamu
-            }
-        }
-        
-        const file = await File.findById(req.params.id);
+        const user = req.user;
+        const file = await loadAccessibleFileById(req.params.id, user, {
+            allowedCollaboratorRoles: ['editor']
+        });
         if (!file || !file.contentType.includes('zip') || file.storageType !== 'r2') {
             return res.status(400).json({ message: 'File is not a processable zip archive.' });
+        }
+        if (Number(file.size || 0) > MAX_EXTRACT_ARCHIVE_BYTES) {
+            return res.status(413).json({ message: 'Archive is too large for inline extraction.' });
         }
 
         const ownerId = user ? user._id : 'guest_extract';
@@ -1814,6 +2016,9 @@ router.post('/files/:id/extract', async (req, res) => {
         const stream = Body.pipe(unzipper.Parse({ forceStream: true }));
 
         for await (const entry of stream) {
+            if (extractedFiles.length >= MAX_EXTRACTED_FILES) {
+                throw new Error('Archive contains too many files.');
+            }
             const buffer = await entry.buffer();
             if (entry.type === 'Directory') continue; // Lewati direktori
 
@@ -1836,18 +2041,6 @@ router.post('/files/:id/extract', async (req, res) => {
             });
             await saveFileWithUniqueAlias(newFile, entry.path);
             extractedFiles.push(newFile);
-        }
-
-        // Jika tamu, kembalikan daftar tautan file, bukan folder
-        if (!user) {
-            const fileLinks = extractedFiles.map(f => ({
-                name: f.originalName,
-                url: `${req.protocol}://${req.get('host')}/w-upload/file/${f.customAlias}`
-            }));
-            return res.status(201).json({ 
-                message: 'Archive extracted successfully as individual files.', 
-                files: fileLinks 
-            });
         }
 
         res.status(201).json({ 

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const { assertSafeOutboundUrl } = require('./security');
 
 async function triggerWebhook(user, event, data) {
     if (!user.webhook || !user.webhook.isActive || !user.webhook.url) return;
@@ -17,13 +18,15 @@ async function triggerWebhook(user, event, data) {
         .digest('hex');
 
     try {
-        await axios.post(user.webhook.url, payload, {
+        const safeUrl = await assertSafeOutboundUrl(user.webhook.url);
+        await axios.post(safeUrl, payload, {
             headers: {
                 'Content-Type': 'application/json',
                 'X-Webhook-Signature': signature,
                 'User-Agent': 'W-Upload-Webhook/1.0'
             },
-            timeout: 5000
+            timeout: 5000,
+            maxRedirects: 0
         });
     } catch (error) {
         console.error(`Webhook failed for user ${user._id}:`, error.message);

@@ -238,8 +238,8 @@ router.post('/refresh-token', async (req, res) => {
         user.sessions[sessionIndex].lastActive = Date.now();
         await user.save();
 
-        res.cookie('token', newAccessToken, { httpOnly: true, maxAge: 900000 });
-        res.cookie('refresh_token', newRefreshToken, { httpOnly: true, maxAge: 604800000 });
+        res.cookie('token', newAccessToken, getCookieOptions(req, 900000));
+        res.cookie('refresh_token', newRefreshToken, getCookieOptions(req, 604800000));
 
         res.json({ message: 'Token refreshed.' });
     } catch (error) {

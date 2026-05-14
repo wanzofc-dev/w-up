@@ -181,17 +181,15 @@
                         <div id="apiKeysList" class="items-list">
                             <% if(user.apiKeys && user.apiKeys.length > 0) { %>
                                 <% user.apiKeys.forEach(apiKey => { %>
+                                    <% const maskedApiKey = (apiKey.keyPrefix || (apiKey.key || '').slice(0, 12) || 'wu_********').concat('...'); %>
                                     <div class="list-item">
                                         <div class="item-info">
                                             <div class="item-title"><%= apiKey.label %></div>
                                             <div class="item-meta">
-                                                <code id="key-<%= apiKey._id %>" data-copy-value="<%= apiKey.key %>"><%= apiKey.key %></code>
+                                                <code id="key-<%= apiKey._id %>" data-copy-value="<%= maskedApiKey %>"><%= maskedApiKey %></code>
                                             </div>
                                         </div>
                                         <div class="item-actions">
-                                            <button class="icon-btn" onclick="copyText('key-<%= apiKey._id %>')" title="Copy Key">
-                                                <i class="fa-solid fa-copy"></i>
-                                            </button>
                                             <button class="icon-btn danger" onclick="revokeApiKey('<%= apiKey._id %>')">
                                                 <i class="fa-solid fa-trash"></i>
                                             </button>
@@ -324,7 +322,7 @@
                         </div>
                         <div class="form-group">
                             <label>Secret Key (Optional)</label>
-                            <input type="password" id="webhookSecret" class="full-input" placeholder="Signing Secret" value="<%= user.webhook ? user.webhook.secret : '' %>">
+                            <input type="password" id="webhookSecret" class="full-input" placeholder="<%= (user.webhook && user.webhook.secret) ? 'Signing Secret (configured)' : 'Signing Secret' %>" value="">
                         </div>
                         <div class="form-row">
                             <label class="toggle-switch">
@@ -763,7 +761,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({ label })
                 });
                 const data = await res.json();
-                if(res.ok) location.reload();
+                if(res.ok) {
+                    try {
+                        await navigator.clipboard.writeText(data.key);
+                    } catch (error) {}
+                    alert(`API key baru berhasil dibuat. Simpan sekarang karena ini hanya ditampilkan sekali:\n\n${data.key}`);
+                    location.reload();
+                }
                 else showToast(data.message || 'Failed to generate key', 'error');
             } catch(e) { showToast('Network error', 'error'); }
             finally {

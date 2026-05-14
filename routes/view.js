@@ -76,6 +76,38 @@ router.get('/docs', auth.checkAuthStatus, (req, res) => {
     res.render('docs');
 });
 
+router.get('/media/user/:userId/:assetType', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.userId).select('profilePhotoR2Key publicCoverR2Key branding.logoR2Key');
+        if (!user) return res.status(404).send('Asset not found.');
+
+        const assetMap = {
+            'profile-photo': user.profilePhotoR2Key,
+            'public-cover': user.publicCoverR2Key,
+            'branding-logo': user.branding?.logoR2Key || ''
+        };
+        const r2Key = assetMap[req.params.assetType];
+        if (!r2Key) return res.status(404).send('Asset not found.');
+
+        const response = await r2.send(new GetObjectCommand({
+            Bucket: getR2BucketName(),
+            Key: r2Key
+        }));
+
+        if (response.ContentType) {
+            res.setHeader('Content-Type', response.ContentType);
+        }
+        if (response.ContentLength !== undefined) {
+            res.setHeader('Content-Length', response.ContentLength);
+        }
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        response.Body.pipe(res);
+    } catch (error) {
+        console.error('User asset stream error:', error.message);
+        res.status(500).send('Failed to load asset.');
+    }
+});
+
 router.get('/u/:username', auth.checkAuthStatus, async (req, res) => {
     try {
         const targetUser = await User.findOne({ username: req.params.username, isPublicProfile: true });

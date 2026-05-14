@@ -135,7 +135,11 @@ mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 15000 })
 const csrfProtection = csurf({ cookie: true });
 
 app.use((req, res, next) => {
-  if (req.headers['x-api-key'] || req.path.startsWith('/api/') || req.path.startsWith('/api/auth/')) {
+  const hasApiKey = Boolean(req.headers['x-api-key']);
+  const hasBearerToken = Boolean(req.headers.authorization && req.headers.authorization.startsWith('Bearer '));
+  const isTrustedWebhook = req.path === '/api/payments/midtrans/notification';
+
+  if (hasApiKey || hasBearerToken || isTrustedWebhook) {
     return next();
   }
   csrfProtection(req, res, next);
