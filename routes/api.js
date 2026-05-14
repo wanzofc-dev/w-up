@@ -22,7 +22,16 @@ const User = require('../models/user');
 const Team = require('../models/team');
 const PaymentTransaction = require('../models/paymentTransaction');
 const AiInsight = require('../models/aiInsight');
-const { r2, PutObjectCommand, GetObjectCommand, getR2BucketName } = require('../utils/r2');
+const {
+    r2,
+    PutObjectCommand,
+    GetObjectCommand,
+    CreateMultipartUploadCommand,
+    UploadPartCommand,
+    CompleteMultipartUploadCommand,
+    AbortMultipartUploadCommand,
+    getR2BucketName
+} = require('../utils/r2');
 const FileRequest = require('../models/fileRequest');
 const UploadSession = require('../models/uploadSession');
 const auth = require('../middleware/auth');
@@ -63,8 +72,9 @@ const API_KEY_LIMITS = {
     pro: 25
 };
 const MAX_REMOTE_UPLOAD_BYTES = 25 * 1024 * 1024;
-const MAX_CHUNK_SIZE_BYTES = 2 * 1024 * 1024;
-const MAX_CHUNK_SESSION_BYTES = 50 * 1024 * 1024;
+const MAX_CHUNK_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_CHUNK_SESSION_BYTES = 150 * 1024 * 1024 * 1024;
+const MAX_STANDARD_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_INLINE_IMAGE_ASSET_BYTES = 5 * 1024 * 1024;
 const MAX_OCR_BYTES = 10 * 1024 * 1024;
 const MAX_CONVERT_BYTES = 20 * 1024 * 1024;
@@ -821,8 +831,10 @@ router.post('/upload', async (req, res) => {
 
         const parsedPayload = parseDataUrl(base64);
         let buffer = parsedPayload.buffer;
-        if (buffer.length > MAX_CHUNK_SESSION_BYTES) {
-            return res.status(413).json({ message: 'Upload exceeds maximum allowed size.' });
+        if (buffer.length > MAX_STANDARD_UPLOAD_BYTES) {
+            return res.status(413).json({
+                message: 'Standard upload supports up to 20 MB. Use chunk upload for larger files.'
+            });
         }
 
         if (!validateMagicBytes(buffer, finalContentType)) {
@@ -976,16 +988,25 @@ router.post('/upload/chunk/init', auth.protectApi, async (req, res) => {
     if (Number(totalSize || 0) > MAX_CHUNK_SESSION_BYTES) {
         return res.status(413).json({ message: 'Chunk upload exceeds maximum allowed size.' });
     }
+    const alias = await ensureUniqueAlias(`chunk_${Date.now()}_${cleanName}`, cleanName);
+    const multipart = await r2.send(new CreateMultipartUploadCommand({
+        Bucket: getR2BucketName(),
+        Key: alias,
+        ContentType: contentType || 'application/octet-stream'
+    }));
     const sessionId = crypto.randomBytes(16).toString('hex');
     const session = new UploadSession({
         sessionId,
         owner: req.user.id,
         filename: cleanName,
         contentType: contentType || 'application/octet-stream',
-        totalSize
+        totalSize,
+        r2Key: alias,
+        r2UploadId: multipart.UploadId,
+        parts: []
     });
     await session.save();
-    res.json({ sessionId });
+    res.json({ sessionId, chunkSize: MAX_CHUNK_SIZE_BYTES });
 });
 
 router.post('/upload/chunk', auth.protectApi, async (req, res) => {
@@ -1000,15 +1021,41 @@ router.post('/upload/chunk', auth.protectApi, async (req, res) => {
     if (payloadSize > MAX_CHUNK_SIZE_BYTES * 2) {
         return res.status(413).json({ message: 'Chunk payload is too large.' });
     }
-    
-    session.chunks.push({ index: chunkIndex, data: base64Chunk });
-    session.uploadedSize = (session.uploadedSize || 0) + payloadSize;
-    if (session.uploadedSize > MAX_CHUNK_SESSION_BYTES * 2) {
+
+    const parsedChunk = parseDataUrl(base64Chunk);
+    const chunkBuffer = parsedChunk.buffer;
+    if (chunkBuffer.length > MAX_CHUNK_SIZE_BYTES) {
+        return res.status(413).json({ message: 'Decoded chunk is too large.' });
+    }
+
+    const partNumber = Number(chunkIndex) + 1;
+    const uploadPartResponse = await r2.send(new UploadPartCommand({
+        Bucket: getR2BucketName(),
+        Key: session.r2Key,
+        UploadId: session.r2UploadId,
+        PartNumber: partNumber,
+        Body: chunkBuffer
+    }));
+
+    const previousPart = session.parts.find(part => part.partNumber === partNumber);
+    session.parts = session.parts.filter(part => part.partNumber !== partNumber);
+    session.parts.push({
+        partNumber,
+        etag: uploadPartResponse.ETag,
+        size: chunkBuffer.length
+    });
+    session.uploadedSize = Math.max(0, (session.uploadedSize || 0) - Number(previousPart?.size || 0)) + chunkBuffer.length;
+    if (session.uploadedSize > MAX_CHUNK_SESSION_BYTES) {
+        await r2.send(new AbortMultipartUploadCommand({
+            Bucket: getR2BucketName(),
+            Key: session.r2Key,
+            UploadId: session.r2UploadId
+        }));
         await UploadSession.deleteOne({ _id: session._id });
         return res.status(413).json({ message: 'Chunk upload exceeds maximum allowed size.' });
     }
     await session.save();
-    res.json({ message: 'Chunk received' });
+    res.json({ message: 'Chunk received', uploadedSize: session.uploadedSize });
 });
 
 router.post('/upload/chunk/finalize', auth.protectApi, async (req, res) => {
@@ -1016,36 +1063,45 @@ router.post('/upload/chunk/finalize', auth.protectApi, async (req, res) => {
     const session = await UploadSession.findOne({ sessionId, owner: req.user.id });
     if (!session) return res.status(404).json({ message: 'Session not found' });
 
-    session.chunks.sort((a, b) => a.index - b.index);
-    const fullBase64 = session.chunks.map(c => c.data.split(',')[1]).join('');
-    
-    const buffer = Buffer.from(fullBase64, 'base64');
     const resolvedContentType = session.contentType || 'application/octet-stream';
-    if (!validateMagicBytes(buffer, resolvedContentType)) { 
-         await UploadSession.deleteOne({ _id: session._id });
-         return res.status(400).json({ message: 'File rejected due to security policy.' });
+    const sortedParts = [...session.parts].sort((a, b) => a.partNumber - b.partNumber);
+    if (!sortedParts.length) {
+        return res.status(400).json({ message: 'No chunks uploaded for this session.' });
     }
-    const fileSize = (fullBase64.length * (3/4)); 
-    const alias = await ensureUniqueAlias(`chunk_${Date.now()}_${sanitizeFilename(session.filename)}`, session.filename);
-    const r2Key = await uploadBufferToR2(req.user.id, alias, buffer, resolvedContentType);
+
+    await r2.send(new CompleteMultipartUploadCommand({
+        Bucket: getR2BucketName(),
+        Key: session.r2Key,
+        UploadId: session.r2UploadId,
+        MultipartUpload: {
+            Parts: sortedParts.map(part => ({
+                ETag: part.etag,
+                PartNumber: part.partNumber
+            }))
+        }
+    }));
 
     const newFile = new File({
         originalName: sanitizeFilename(session.filename),
-        customAlias: alias,
+        customAlias: session.r2Key,
         contentType: resolvedContentType, 
-        size: fileSize,
+        size: Number(session.totalSize || session.uploadedSize || 0),
         storageType: 'r2',
-        r2Key,
+        r2Key: session.r2Key,
         owner: req.user.id,
         parentId: parentId || null,
-        md5Hash: crypto.createHash('md5').update(buffer).digest('hex'),
-        sha256Hash: crypto.createHash('sha256').update(buffer).digest('hex')
+        md5Hash: '',
+        sha256Hash: ''
     });
 
     await saveFileWithUniqueAlias(newFile, session.filename);
     await UploadSession.deleteOne({ _id: session._id });
     await createUploadInsight(req.user, newFile, 'chunk_upload');
-    res.status(201).json({ message: 'File assembled successfully' });
+    res.status(201).json({
+        message: 'File assembled successfully',
+        file: serializeDashboardFile(newFile),
+        url: `${req.protocol}://${req.get('host')}/w-upload/file/${newFile.customAlias}`
+    });
 });
 
 router.put('/files/:id/rename', auth.protectApi, async (req, res) => {
@@ -1177,6 +1233,23 @@ router.post('/files/:id/collaborator', auth.protectApi, async (req, res) => {
     }
 
     res.json({ message: 'Collaborator added/updated and notified' });
+});
+
+router.delete('/files/:id/collaborator/:username', auth.protectApi, async (req, res) => {
+    const file = await File.findOne({ _id: req.params.id, owner: req.user.id });
+    if (!file) return res.status(404).json({ message: 'File not found' });
+
+    const collabUser = await User.findOne({ username: req.params.username });
+    if (!collabUser) return res.status(404).json({ message: 'User not found' });
+
+    const before = file.collaborators.length;
+    file.collaborators = file.collaborators.filter(entry => !entry.user.equals(collabUser._id));
+    if (file.collaborators.length === before) {
+        return res.status(404).json({ message: 'Collaborator not found' });
+    }
+
+    await file.save();
+    res.json({ message: 'Collaborator removed.' });
 });
 router.post('/files/:id/email-share', auth.protectApi, async (req, res) => {
     const { email } = req.body;

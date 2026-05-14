@@ -1,4 +1,13 @@
-const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const {
+    S3Client,
+    PutObjectCommand,
+    GetObjectCommand,
+    DeleteObjectCommand,
+    CreateMultipartUploadCommand,
+    UploadPartCommand,
+    CompleteMultipartUploadCommand,
+    AbortMultipartUploadCommand
+} = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const DEFAULT_R2_ACCOUNT_ID = 'ec786e5c4cd0818807637b34da897d76';
@@ -38,6 +47,10 @@ module.exports = {
     PutObjectCommand,
     GetObjectCommand,
     DeleteObjectCommand,
+    CreateMultipartUploadCommand,
+    UploadPartCommand,
+    CompleteMultipartUploadCommand,
+    AbortMultipartUploadCommand,
     getSignedUrl,
     getR2AccountId,
     getR2BucketName,

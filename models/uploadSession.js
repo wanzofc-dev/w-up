@@ -7,9 +7,12 @@ const UploadSessionSchema = new mongoose.Schema({
   contentType: String,
   totalSize: Number,
   uploadedSize: { type: Number, default: 0 },
-  chunks: [{
-    index: Number,
-    data: String 
+  r2Key: String,
+  r2UploadId: String,
+  parts: [{
+    partNumber: Number,
+    etag: String,
+    size: Number
   }],
   createdAt: { type: Date, default: Date.now, expires: 86400 } 
 });

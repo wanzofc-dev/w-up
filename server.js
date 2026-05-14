@@ -77,7 +77,15 @@ app.use(helmet({
         "fonts.googleapis.com"
       ],
       fontSrc: ["'self'", "cdnjs.cloudflare.com", "fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "blob:", "*"], 
+      imgSrc: [
+        "'self'",
+        "data:",
+        "blob:",
+        "pagead2.googlesyndication.com",
+        "tpc.googlesyndication.com",
+        "googleads.g.doubleclick.net",
+        "www.google.com"
+      ], 
       mediaSrc: ["'self'", "data:", "blob:"],
       frameSrc: [
         "'self'", 
@@ -90,6 +98,7 @@ app.use(helmet({
       ],
       connectSrc: [
         "'self'",
+        "cdn.jsdelivr.net",
         "app.midtrans.com",
         "app.sandbox.midtrans.com",
         "api.midtrans.com",

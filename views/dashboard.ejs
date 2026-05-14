@@ -270,10 +270,14 @@
 
 <div class="modal" id="shareModal"><div class="modal-box" style="max-width:640px"><h3>Share Settings</h3><div class="tabs"><button class="tab-btn active" data-tab="tab-collab">Collaborators</button><button class="tab-btn" data-tab="tab-links">Share Links</button><button class="tab-btn" data-tab="tab-analytics">Analytics</button></div><div class="tab-content active" id="tab-collab"><div style="display:flex;gap:10px;margin-bottom:1rem;"><input type="text" id="shareCollabUser" class="full-input" placeholder="Username"><select id="collabRole" class="full-input" style="width:120px; flex-shrink: 0;"><option value="viewer">Viewer</option><option value="uploader">Uploader</option><option value="editor">Editor</option></select><button class="btn primary-btn" id="addCollabBtn">Add</button></div><div id="collaboratorsList" class="items-list"></div></div><div class="tab-content" id="tab-links"><div class="share-link-toolbar"><span id="visibilityStatusChip" class="file-visibility-badge public">Public</span><button class="btn secondary-btn" id="toggleVisibilityBtn"><i class="fa-solid fa-eye-slash"></i> Set Private</button></div><div class="share-custom-row"><input type="text" id="customPrivateSlug" class="full-input" placeholder="custom-private-link"><button class="btn secondary-btn" id="createShareLinkBtn"><i class="fa-solid fa-plus"></i> Create Link</button></div><div id="shareLinksList" class="items-list"></div></div><div class="tab-content" id="tab-analytics"><div style="position: relative; height:200px; width:100%;"><canvas id="analyticsChart"></canvas></div><ul id="analyticsList"></ul></div><div class="modal-footer"><button class="btn cancel-btn">Close</button></div></div></div>
 <div class="modal" id="fileRequestModal"><div class="modal-box"><h3>Create File Request</h3><input type="text" id="fileRequestLabel" placeholder="Label (e.g., 'Project Submissions')" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="createFileRequestBtn">Create</button></div></div></div>
+<div class="modal" id="fileRequestResultModal"><div class="modal-box"><h3>File Request Created</h3><input type="text" id="fileRequestResultInput" class="full-input" readonly><div class="modal-footer"><button class="btn cancel-btn">Close</button><button class="btn confirm-btn" id="copyFileRequestBtn">Copy Link</button></div></div></div>
 <div class="modal" id="folderModal"><div class="modal-box"><h3>New Folder</h3><input type="text" id="folderNameInput" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="createFolderBtn">Create</button></div></div></div>
 <div class="modal" id="remoteModal"><div class="modal-box"><h3>Remote Upload</h3><input type="url" id="remoteUrlInput" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="startRemoteBtn">Fetch</button></div></div></div>
 <div class="modal" id="renameModal"><div class="modal-box"><h3>Rename</h3><input type="text" id="renameInput" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmRenameBtn">Save</button></div></div></div>
 <div class="modal" id="metaModal"><div class="modal-box"><h3>Details</h3><textarea id="descInput" placeholder="Description" class="full-input"></textarea><input type="text" id="tagsInput" placeholder="Tags (comma, separated)" class="full-input"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="saveMetaBtn">Save</button></div></div></div>
+<div class="modal" id="moveModal"><div class="modal-box"><h3>Move Items</h3><input type="text" id="moveFolderInput" class="full-input" placeholder="Destination folder ID, leave empty for root"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmMoveBtn">Move</button></div></div></div>
+<div class="modal" id="transferOwnershipModal"><div class="modal-box"><h3>Transfer Ownership</h3><input type="text" id="transferOwnerInput" class="full-input" placeholder="Username of the new owner"><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmTransferOwnershipBtn">Transfer</button></div></div></div>
+<div class="modal" id="convertModal"><div class="modal-box"><h3>Convert Image</h3><select id="convertFormatInput" class="full-input"><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WEBP</option></select><div class="modal-footer"><button class="btn cancel-btn">Cancel</button><button class="btn confirm-btn" id="confirmConvertBtn">Convert</button></div></div></div>
 <div class="modal" id="uploadProgressModal">
     <div class="modal-box upload-progress-box">
         <div class="upload-progress-head">
@@ -617,6 +621,9 @@ document.addEventListener('DOMContentLoaded', () => {
         uploading: false,
         uploadItems: []
     };
+    const STANDARD_UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
+    const DEFAULT_CHUNK_UPLOAD_BYTES = 5 * 1024 * 1024;
+    let pendingMoveIds = [];
 
     function escapeHtml(value = '') {
         return String(value)
@@ -633,6 +640,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
         if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
         return `${value} B`;
+    }
+
+    function readBlobAsDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Failed to read blob chunk.'));
+            reader.readAsDataURL(blob);
+        });
     }
 
     function getFileExtension(name = '') {
@@ -838,7 +854,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let successCount = 0;
         for (const item of dashboardState.uploadItems) {
-            const result = await uploadStandard(item);
+            const result = item.file.size > STANDARD_UPLOAD_LIMIT_BYTES
+                ? await uploadChunked(item)
+                : await uploadStandard(item);
             if (result?.success) successCount += 1;
             updateUploadOverall(queue.length);
         }
@@ -852,6 +870,104 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new Event('storage:refresh'));
     }
     
+    async function uploadChunked(item) {
+        const { file, row } = item;
+        try {
+            item.progress = 5;
+            updateUploadRow(row, {
+                percent: item.progress,
+                status: 'uploading',
+                note: 'Memulai sesi multipart upload ke server.'
+            });
+            updateUploadOverall(dashboardState.uploadItems.length);
+
+            const initResponse = await fetch('/api/upload/chunk/init', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename: file.name,
+                    totalSize: file.size,
+                    contentType: file.type || 'application/octet-stream'
+                })
+            });
+            const initData = await initResponse.json();
+            if (!initResponse.ok) {
+                throw new Error(initData.message || 'Chunk upload init failed.');
+            }
+
+            const chunkSize = Number(initData.chunkSize || DEFAULT_CHUNK_UPLOAD_BYTES);
+            const totalChunks = Math.ceil(file.size / chunkSize);
+
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+                const start = chunkIndex * chunkSize;
+                const end = Math.min(start + chunkSize, file.size);
+                const blobChunk = file.slice(start, end);
+                const base64Chunk = await readBlobAsDataUrl(blobChunk);
+
+                const chunkResponse = await fetch('/api/upload/chunk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: initData.sessionId,
+                        chunkIndex,
+                        base64Chunk
+                    })
+                });
+                const chunkData = await chunkResponse.json();
+                if (!chunkResponse.ok) {
+                    throw new Error(chunkData.message || `Chunk ${chunkIndex + 1} failed.`);
+                }
+
+                item.progress = 10 + (((chunkIndex + 1) / totalChunks) * 80);
+                updateUploadRow(row, {
+                    percent: item.progress,
+                    status: 'uploading',
+                    note: `Chunk ${chunkIndex + 1}/${totalChunks} selesai dikirim.`
+                });
+                updateUploadOverall(dashboardState.uploadItems.length);
+            }
+
+            const finalizeResponse = await fetch('/api/upload/chunk/finalize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sessionId: initData.sessionId,
+                    parentId: currentFolderId
+                })
+            });
+            const finalizeData = await finalizeResponse.json();
+            if (!finalizeResponse.ok) {
+                throw new Error(finalizeData.message || 'Chunk upload finalize failed.');
+            }
+
+            item.progress = 100;
+            item.done = true;
+            if (finalizeData.file) {
+                dashboardState.stats.ownedFiles += 1;
+                dashboardState.stats.currentUsage += Number(finalizeData.file.size || 0);
+                appendUploadedFile(finalizeData.file);
+                updateDashboardStatsUi();
+            }
+            updateUploadRow(row, {
+                percent: 100,
+                status: 'success',
+                note: 'File besar berhasil disimpan lewat multipart upload.'
+            });
+            showToast(finalizeData.message || `${file.name} uploaded`, 'success');
+            return { success: true, data: finalizeData };
+        } catch (error) {
+            item.progress = 100;
+            item.done = true;
+            updateUploadRow(row, {
+                percent: 100,
+                status: 'error',
+                note: error.message || 'Chunk upload gagal.'
+            });
+            showToast(error.message || `Upload gagal untuk ${file.name}`, 'error');
+            return { success: false };
+        }
+    }
+
     function uploadStandard(item) {
         return new Promise((resolve) => {
             const { file, row } = item;
@@ -1138,9 +1254,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('cmMove').addEventListener('click', async () => {
         if (!contextTarget) return;
-        const folderId = prompt("Enter the ID of the destination folder (leave empty for root):");
-        if (folderId === null) return;
-        if (await performAction(`/api/files/bulk`, 'POST', { fileIds: [contextTarget.dataset.id], action: 'move', targetFolderId: folderId || null })) location.reload();
+        pendingMoveIds = [contextTarget.dataset.id];
+        document.getElementById('moveFolderInput').value = '';
+        document.getElementById('moveModal').classList.add('active');
     });
 
     document.getElementById('createFileRequestBtn').addEventListener('click', async () => {
@@ -1148,16 +1264,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch('/api/file-requests', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ label, folderId: currentFolderId }) });
         const data = await res.json();
         if(res.ok) {
-            prompt('Here is your File Request link:', data.link);
-            closeModal();
+            document.getElementById('fileRequestResultInput').value = data.link;
+            document.getElementById('fileRequestModal').classList.remove('active');
+            document.getElementById('fileRequestResultModal').classList.add('active');
         }
     });
 
+    document.getElementById('copyFileRequestBtn').addEventListener('click', async () => {
+        const input = document.getElementById('fileRequestResultInput');
+        if (!input.value) return;
+        await navigator.clipboard.writeText(input.value);
+        showToast('File request link copied!', 'success');
+    });
+
     document.getElementById('cmTransferOwner').addEventListener('click', async () => {
-        const username = prompt("Enter the username of the new owner:");
-        if (!username || !contextTarget) return;
-        if (!confirm(`Transfer ownership to ${username}? This cannot be undone.`)) return;
-        if (await performAction(`/api/files/${contextTarget.dataset.id}/transfer-ownership`, 'POST', { username })) location.reload();
+        if (!contextTarget) return;
+        document.getElementById('transferOwnerInput').value = '';
+        document.getElementById('transferOwnershipModal').classList.add('active');
     });
 
     document.getElementById('cmShare').addEventListener('click', async () => {
@@ -1207,8 +1330,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.removeCollab = async (username) => {
         if(!confirm(`Remove ${username} from collaborators?`)) return;
-        // API endpoint to remove a collaborator is missing, this is a placeholder.
-        showToast('Remove collaborator API endpoint not implemented yet.', 'warning');
+        if (await performAction(`/api/files/${contextTarget.dataset.id}/collaborator/${encodeURIComponent(username)}`, 'DELETE')) {
+            loadShareData();
+        }
     };
     
     async function loadShareData() {
@@ -1281,10 +1405,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('cmConvert').addEventListener('click', async () => {
         if (!contextTarget) return;
-        const toFormat = prompt('Convert image to which format? (e.g., jpg, png, webp)', 'jpg');
-        if (!toFormat) return;
-        showToast(`Converting to ${toFormat}...`, 'info');
-        if (await performAction(`/api/files/${contextTarget.dataset.id}/convert`, 'POST', { toFormat })) setTimeout(() => location.reload(), 1000);
+        document.getElementById('convertFormatInput').value = 'jpg';
+        document.getElementById('convertModal').classList.add('active');
     });
 
     const selectedIds = new Set();
@@ -1315,8 +1437,30 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('bulkDeleteBtn').addEventListener('click', () => handleBulkAction('delete'));
     document.getElementById('bulkStarBtn').addEventListener('click', () => handleBulkAction('star'));
     document.getElementById('bulkMoveBtn').addEventListener('click', () => {
-        const folderId = prompt("Enter destination folder ID (leave empty for root):");
-        if (folderId !== null) handleBulkAction('move', { targetFolderId: folderId || null });
+        pendingMoveIds = Array.from(selectedIds);
+        if (!pendingMoveIds.length) return;
+        document.getElementById('moveFolderInput').value = '';
+        document.getElementById('moveModal').classList.add('active');
+    });
+
+    document.getElementById('confirmMoveBtn').addEventListener('click', async () => {
+        const folderId = document.getElementById('moveFolderInput').value.trim();
+        if (!pendingMoveIds.length) return;
+        if (await performAction('/api/files/bulk', 'POST', { fileIds: pendingMoveIds, action: 'move', targetFolderId: folderId || null })) location.reload();
+    });
+
+    document.getElementById('confirmTransferOwnershipBtn').addEventListener('click', async () => {
+        const username = document.getElementById('transferOwnerInput').value.trim();
+        if (!username || !contextTarget) return;
+        if (!confirm(`Transfer ownership to ${username}? This cannot be undone.`)) return;
+        if (await performAction(`/api/files/${contextTarget.dataset.id}/transfer-ownership`, 'POST', { username })) location.reload();
+    });
+
+    document.getElementById('confirmConvertBtn').addEventListener('click', async () => {
+        const toFormat = document.getElementById('convertFormatInput').value;
+        if (!contextTarget || !toFormat) return;
+        showToast(`Converting to ${toFormat}...`, 'info');
+        if (await performAction(`/api/files/${contextTarget.dataset.id}/convert`, 'POST', { toFormat })) setTimeout(() => location.reload(), 1000);
     });
 });
 </script>

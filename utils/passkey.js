@@ -5,15 +5,27 @@ const {
     verifyAuthenticationResponse
 } = require('@simplewebauthn/server');
 
-if (!process.env.APP_HOSTNAME || !process.env.APP_URL) {
-    throw new Error('FATAL: APP_HOSTNAME and APP_URL must be defined in .env file.');
+const fallbackUrl = process.env.APP_URL || 'https://wanzofc.site';
+const fallbackHostname = process.env.APP_HOSTNAME || (() => {
+    try {
+        return new URL(fallbackUrl).hostname;
+    } catch (error) {
+        return 'wanzofc.site';
+    }
+})();
+
+const passkeyConfig = {
+    rpID: fallbackHostname,
+    rpName: process.env.APP_NAME || 'w upload',
+    origin: fallbackUrl,
+    enabled: Boolean(fallbackHostname && fallbackUrl)
+};
+
+function ensurePasskeyConfigured() {
+    if (!passkeyConfig.enabled) {
+        throw new Error('Passkey configuration is not available.');
+    }
 }
-
-const rpID = process.env.APP_HOSTNAME;
-const rpName = process.env.APP_NAME || 'App Name';
-const origin = process.env.APP_URL;
-
-const passkeyConfig = { rpID, rpName, origin };
 
 function toWebAuthnUserId(user) {
     return Buffer.from(user._id.toString(), 'utf8');
@@ -21,6 +33,7 @@ function toWebAuthnUserId(user) {
 
 async function generatePasskeyRegistrationOptions(user) {
     try {
+        ensurePasskeyConfigured();
         const existingCredentials = user.passkeys.map(key => ({
             id: Buffer.from(key.credentialID).toString('base64url'),
             type: 'public-key',
@@ -54,6 +67,7 @@ async function generatePasskeyRegistrationOptions(user) {
 
 async function verifyPasskeyRegistration(user, response) {
     try {
+        ensurePasskeyConfigured();
         const verification = await verifyRegistrationResponse({
             response,
             expectedChallenge: user.currentChallenge,
@@ -121,6 +135,7 @@ async function verifyPasskeyRegistration(user, response) {
 
 async function generatePasskeyLoginOptions(user) {
     try {
+        ensurePasskeyConfigured();
         const allowedCredentials = user ? user.passkeys.map(key => ({
             id: Buffer.from(key.credentialID).toString('base64url'),
             type: 'public-key',
@@ -147,6 +162,7 @@ async function generatePasskeyLoginOptions(user) {
 
 async function verifyPasskeyLogin(user, response) {
     try {
+        ensurePasskeyConfigured();
         const credential = user.passkeys.find(key => {
             const storedID = Buffer.from(key.credentialID).toString('base64url');
             return storedID === response.id;

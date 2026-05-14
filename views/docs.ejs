@@ -104,7 +104,13 @@ Content-Type: application/json</pre>
             <div class="api-endpoint">
                 <span class="method post">POST</span>
                 <span class="url">/api/upload/chunk/init</span>
-                <p>Mulai upload file besar secara chunk jika Anda sedang membangun uploader kustom sendiri. Untuk dashboard bawaan, upload sekarang sudah memakai modal progress real-time tanpa refresh halaman.</p>
+                <p>Mulai upload file besar secara chunk jika Anda sedang membangun uploader kustom sendiri. Dashboard bawaan sekarang otomatis memakai chunked multipart upload ke R2 untuk file besar, jadi file di atas upload standar tidak lagi dipaksa lewat satu request Base64.</p>
+                <div class="code-block">
+<pre>POST /api/upload/chunk/init
+POST /api/upload/chunk
+POST /api/upload/chunk/finalize</pre>
+                    <p style="margin-top:0.75rem;">Flow ini lebih cocok untuk file besar karena setiap chunk dikirim terpisah dan dirakit sebagai multipart upload di object storage.</p>
+                </div>
             </div>
         </section>
 

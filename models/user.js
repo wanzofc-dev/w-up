@@ -10,6 +10,7 @@ const WebAuthnCredentialSchema = new mongoose.Schema({
 
 const BrandingSchema = new mongoose.Schema({
     logoUrl: { type: String },
+    logoR2Key: { type: String },
     coverUrl: { type: String },
     primaryColor: { type: String, default: '#4F46E5' },
     pageTitle: { type: String }
@@ -43,7 +44,9 @@ const UserSchema = new mongoose.Schema({
   passkeys: [WebAuthnCredentialSchema],
   currentChallenge: { type: String },
   apiKeys: [{ 
-    key: { type: String, required: true }, 
+    key: { type: String },
+    keyHash: { type: String },
+    keyPrefix: { type: String, default: '' },
     label: { type: String, default: 'General' },
     lastUsed: { type: Date },
     createdAt: { type: Date, default: Date.now } 
@@ -58,7 +61,9 @@ const UserSchema = new mongoose.Schema({
   publicTitle: { type: String, default: '' },
   publicThemeColor: { type: String, default: '#2563eb' },
   profilePhotoUrl: { type: String, default: '' },
+  profilePhotoR2Key: { type: String, default: '' },
   publicCoverUrl: { type: String, default: '' },
+  publicCoverR2Key: { type: String, default: '' },
   branding: { type: BrandingSchema, default: () => ({}) },
   teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
   sessions: [{
